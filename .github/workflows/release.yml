@@ -1,0 +1,67 @@
+name: Release
+
+# Stages a release on npm via Trusted Publishing (OIDC): no npm token is stored
+# anywhere. CI can only STAGE - a maintainer approves with 2FA before the
+# version becomes public, so a compromised repository cannot publish on its own.
+#
+#   1. npm version patch && git push --follow-tags     (this workflow stages it)
+#   2. npm stage list hetzner-axi                            (needs npm >= 12)
+#   3. npm stage approve <stage-id>                     (prompts for 2FA)
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write # required for npm trusted publishing
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - name: Tag must match package.json version
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json $version"
+            exit 1
+          fi
+      # A version published by hand (npm publish, then push the tag) must not
+      # turn into a failed run: npm never allows re-publishing a version.
+      - name: Skip if this version is already on npm
+        id: registry
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "hetzner-axi@$version" version >/dev/null 2>&1; then
+            echo "hetzner-axi@$version is already published - nothing to do"
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.registry.outputs.published == 'false'
+        run: pnpm install --frozen-lockfile
+      - if: steps.registry.outputs.published == 'false'
+        run: pnpm run check
+      # `npm stage` needs npm >= 12
+      - if: steps.registry.outputs.published == 'false'
+        run: npm install -g npm@latest
+      - if: steps.registry.outputs.published == 'false'
+        run: npm stage publish
+      - if: steps.registry.outputs.published == 'false'
+        name: How to approve
+        run: |
+          {
+            echo "### Staged, not yet public"
+            echo "Approve with 2FA to publish:"
+            echo '```sh'
+            echo "npm stage list hetzner-axi"
+            echo "npm stage approve <stage-id>"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

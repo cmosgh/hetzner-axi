@@ -1,0 +1,60 @@
+{
+  "name": "hetzner-axi",
+  "version": "0.1.0",
+  "description": "AXI-compliant Hetzner Cloud CLI for agents - servers, firewalls, volumes, IPs, networks, load balancers and DNS zones - with token-efficient TOON output, previews and idempotent mutations",
+  "type": "module",
+  "keywords": [
+    "hetzner",
+    "hcloud",
+    "hetzner-cloud",
+    "dns",
+    "cli",
+    "agent",
+    "axi",
+    "toon"
+  ],
+  "bin": {
+    "hetzner-axi": "dist/bin/hetzner-axi.js"
+  },
+  "files": [
+    "dist",
+    "skills/hetzner-axi",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/bin/hetzner-axi.js', 0o755)\"",
+    "build:skill": "tsx scripts/build-skill.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build && pnpm run build:skill -- --check",
+    "dev": "tsx bin/hetzner-axi.ts",
+    "prepublishOnly": "pnpm run check"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cmosgh/hetzner-axi.git"
+  },
+  "homepage": "https://github.com/cmosgh/hetzner-axi#readme",
+  "bugs": {
+    "url": "https://github.com/cmosgh/hetzner-axi/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@napi-rs/keyring": "^2.1.0",
+    "@toon-format/toon": "^4.1.1",
+    "axi-sdk-js": "^0.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "author": "Cristian Mos",
+  "packageManager": "pnpm@10.28.2"
+}
