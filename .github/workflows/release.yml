@@ -7,6 +7,8 @@ name: Release
 #   1. npm version patch && git push --follow-tags     (this workflow stages it)
 #   2. npm stage list hetzner-axi                            (needs npm >= 12)
 #   3. npm stage approve <stage-id>                     (prompts for 2FA)
+#
+# The github-release job also publishes a GitHub release with generated notes.
 on:
   push:
     tags: ["v*"]
@@ -65,3 +67,20 @@ jobs:
             echo "npm stage approve <stage-id>"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Separate job so only this step can write to the repository; the npm job keeps read-only contents.
+  github-release:
+    needs: stage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create the GitHub release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists - nothing to do"
+          else
+            gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
+          fi
