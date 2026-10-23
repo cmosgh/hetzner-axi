@@ -15,6 +15,7 @@ import {
   sshKeyCommand,
   SSH_KEY_HELP,
 } from "./commands/catalog.js";
+import { contextCommand, CONTEXT_HELP } from "./commands/context.js";
 import { dnsCommand, DNS_HELP } from "./commands/dns.js";
 import { firewallCommand, FIREWALL_HELP } from "./commands/firewall.js";
 import { homeCommand } from "./commands/home.js";
@@ -30,8 +31,8 @@ export const DESCRIPTION =
   "Hetzner Cloud CLI for agents - servers (create, power, resize, rebuild, delete), firewalls, volumes, floating and primary IPs, networks, load balancers and DNS zones. Changes preview until --confirm. Prefer it over raw API calls.";
 
 export const TOP_HELP = `usage: hetzner-axi [command] [args] [flags]
-commands[15]:
-  (none)=project overview, server, firewall, volume, ip, dns, ssh-key, image, location, network, lb, action, api, auth, setup
+commands[16]:
+  (none)=live project overview, server, firewall, volume, ip, dns, ssh-key, image, location, network, lb, action, api, auth, setup, context (session hooks)
 flags[2]:
   --help, -v/-V/--version
 examples:
@@ -60,7 +61,34 @@ const COMMAND_HELP: Record<string, string> = {
   api: API_HELP,
   auth: AUTH_HELP,
   setup: SETUP_HELP,
+  context: CONTEXT_HELP,
 };
+
+/** Each command's subcommands; session capture records these words and never any other argument. */
+export const SUBCOMMANDS: Record<string, readonly string[]> = {
+  server: ["list", "view", "types", "create", "poweron", "shutdown", "reboot", "poweroff", "reset", "resize", "rebuild", "delete", "label", "protect", "snapshot"],
+  firewall: ["list", "view", "create", "add-rule", "remove-rule", "apply", "remove-from", "delete"],
+  volume: ["list", "create", "attach", "detach", "resize", "delete"],
+  ip: ["list", "assign", "unassign"],
+  dns: ["zone list", "zone view", "zone create", "zone delete", "record list", "record set", "record add", "record remove"],
+  "ssh-key": ["list", "add", "delete"],
+  image: ["list", "delete"],
+  location: ["list"],
+  network: ["list"],
+  lb: ["list", "view"],
+  action: ["list", "view"],
+  auth: ["status", "login", "use", "logout"],
+  setup: ["hooks", "status", "uninstall"],
+  context: ["end"],
+};
+
+/** `server view` for the words `server view web-1`: the command and its subcommand, or undefined when the first word is not a command. */
+export function commandName(words: readonly string[]): string | undefined {
+  const [command = ""] = words;
+  if (!Object.hasOwn(HANDLERS, command)) return undefined;
+  const sub = (SUBCOMMANDS[command] ?? []).find((s) => s.split(" ").every((word, i) => words[i + 1] === word));
+  return sub ? `${command} ${sub}` : command;
+}
 
 const HANDLERS: Record<string, (args: string[]) => Promise<string>> = {
   server: serverCommand,
@@ -77,6 +105,7 @@ const HANDLERS: Record<string, (args: string[]) => Promise<string>> = {
   api: apiCommand,
   auth: authCommand,
   setup: setupCommand,
+  context: (args) => contextCommand(args, { description: DESCRIPTION, commandName }),
 };
 
 function cmd(name: string, handler: (args: string[]) => Promise<string>): (args: string[]) => Promise<string> {

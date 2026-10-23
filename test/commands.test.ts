@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SUBCOMMANDS } from "../src/cli.js";
 import { readConfig, writeConfig } from "../src/config.js";
 import { clearToken, storeToken } from "../src/credentials.js";
 import { CX22, CX32, done, mockApi, page, run, running, server, useTestEnv } from "./helpers.js";
@@ -589,22 +590,18 @@ describe("auth with HETZNER_AXI_NO_KEYCHAIN=1", () => {
 });
 
 describe("help", () => {
-  const SUBCOMMANDS: Record<string, string[]> = {
-    server: ["list", "view", "types", "create", "poweron", "shutdown", "reboot", "poweroff", "reset", "resize", "rebuild", "delete", "label", "protect", "snapshot"],
-    firewall: ["list", "view", "create", "add-rule", "remove-rule", "apply", "remove-from", "delete"],
-    volume: ["list", "create", "attach", "detach", "resize", "delete"],
-    ip: ["list", "assign", "unassign"],
-    dns: ["zone list", "zone view", "zone create", "zone delete", "record list", "record set", "record add", "record remove"],
-    "ssh-key": ["list", "add", "delete"],
-    image: ["list", "delete"],
-    location: ["list"],
-    network: ["list"],
-    lb: ["list", "view"],
-    action: ["list", "view"],
-    auth: ["status", "login", "use", "logout"],
-  };
+  // setup runs only in session.test.ts, under a temporary HOME.
+  const commands = Object.entries(SUBCOMMANDS).filter(([command]) => command !== "setup");
 
-  it.each(Object.entries(SUBCOMMANDS))("%s --help has examples and documents every flag its subcommands accept", async (command, subs) => {
+  it("lists the subcommands each command accepts, as session capture records them", async () => {
+    const { calls } = mockApi([]);
+    const listed = async (...argv: string[]) => /subcommands: (.+)$/m.exec((await run(...argv, "nope")).stdout)![1]!.split(", ");
+    for (const [command, subs] of commands) if (command !== "dns" && command !== "context") expect(await listed(command), command).toEqual(subs);
+    for (const group of ["zone", "record"]) expect((await listed("dns", group)).map((s) => `${group} ${s}`)).toEqual(SUBCOMMANDS["dns"]!.filter((s) => s.startsWith(`${group} `)));
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(commands)("%s --help has examples and documents every flag its subcommands accept", async (command, subs) => {
     const { calls } = mockApi([]);
     const help = (await run(command, "--help")).stdout;
     expect(help).toMatch(/^examples\[[2-9]\]:$/m);
