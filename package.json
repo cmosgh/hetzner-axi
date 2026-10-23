@@ -1,6 +1,6 @@
 {
   "name": "hetzner-axi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AXI-compliant Hetzner Cloud CLI for agents - servers, firewalls, volumes, IPs, networks, load balancers and DNS zones - with token-efficient TOON output, previews and idempotent mutations",
   "type": "module",
   "keywords": [
