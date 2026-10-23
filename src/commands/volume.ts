@@ -16,14 +16,17 @@ subcommands[6]:
 flags{list}:
   --fields <${Object.keys(LIST_FIELDS).join(",")}>
 flags{create}:
-  --name, --size <GB 10-10240> (required), --location <name> | --server <name|id> (attach right away), --format <ext4|xfs>, --automount, --label <k=v> (repeatable), --confirm
+  --name, --size <GB 10-10240> (required), --location <name> | --server <name|id> (attach right away), --format <ext4|xfs>, --automount, --label <k=v> (repeatable), --confirm, --no-wait, --wait <seconds>
 flags{attach}:
-  --server <name|id> (required), --automount
+  --server <name|id> (required), --automount, --no-wait, --wait <seconds>
 flags{resize}:
-  --size <GB> (grow only), --confirm
-flags{detach,delete}:
+  --size <GB> (grow only), --confirm, --no-wait, --wait <seconds>
+flags{detach}:
+  --confirm, --no-wait, --wait <seconds>
+flags{delete}:
   --confirm
 notes:
+  Mutations wait for the Hetzner action to finish (default 180s); --no-wait returns early.
   Volumes are billed per GB-month; create and resize preview the cost until --confirm. Resizing only grows a volume - grow the filesystem afterwards (resize2fs / xfs_growfs).
 examples[4]:
   hetzner-axi volume list

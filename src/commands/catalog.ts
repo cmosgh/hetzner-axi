@@ -22,6 +22,10 @@ examples[3]:
 
 export const LOCATION_HELP = `usage: hetzner-axi location list
 Hetzner Cloud locations with their network zone.
+examples[3]:
+  hetzner-axi location list
+  hetzner-axi server types --location hel1
+  hetzner-axi volume create --name data --size 50 --location nbg1 --confirm
 `;
 
 export async function imageCommand(args: string[]): Promise<string> {
@@ -154,6 +158,10 @@ async function sshKeyAdd(args: string[]): Promise<string> {
 
 export const NETWORK_HELP = `usage: hetzner-axi network list
 Private networks with their IP range, subnets and attached servers.
+examples[3]:
+  hetzner-axi network list
+  hetzner-axi server list --fields private_ip
+  hetzner-axi server create --name db-2 --type cx22 --image ubuntu-24.04 --network internal --confirm
 `;
 
 export async function networkCommand(args: string[]): Promise<string> {
@@ -183,6 +191,10 @@ export const LB_HELP = `usage: hetzner-axi lb <list|view> [<name|id>]
 Load balancers with their services and target health (read-only).
 flags{list}:
   --fields <${Object.keys(LB_FIELDS).join(",")}>
+examples[3]:
+  hetzner-axi lb list
+  hetzner-axi lb list --fields location
+  hetzner-axi lb view web-lb
 `;
 
 export async function lbCommand(args: string[]): Promise<string> {

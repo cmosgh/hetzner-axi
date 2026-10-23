@@ -470,6 +470,42 @@ describe("action list", () => {
   });
 });
 
+describe("help", () => {
+  const SUBCOMMANDS: Record<string, string[]> = {
+    server: ["list", "view", "types", "create", "poweron", "shutdown", "reboot", "poweroff", "reset", "resize", "rebuild", "delete", "label", "protect", "snapshot"],
+    firewall: ["list", "view", "create", "add-rule", "remove-rule", "apply", "remove-from", "delete"],
+    volume: ["list", "create", "attach", "detach", "resize", "delete"],
+    ip: ["list", "assign", "unassign"],
+    dns: ["zone list", "zone view", "zone create", "zone delete", "record list", "record set", "record add", "record remove"],
+    "ssh-key": ["list", "add", "delete"],
+    image: ["list", "delete"],
+    location: ["list"],
+    network: ["list"],
+    lb: ["list", "view"],
+    action: ["list", "view"],
+    auth: ["status", "login", "use", "logout"],
+  };
+
+  it.each(Object.entries(SUBCOMMANDS))("%s --help has examples and documents every flag its subcommands accept", async (command, subs) => {
+    const { calls } = mockApi([]);
+    const help = (await run(command, "--help")).stdout;
+    expect(help).toMatch(/^examples\[[2-9]\]:$/m);
+    for (const sub of subs) {
+      // The unknown-flag error lists exactly what the parser accepts.
+      const { stdout } = await run(command, ...sub.split(" "), "--bogus");
+      const valid = /valid flags for `[^`]+`: (.+) \(--help always allowed\)/.exec(stdout)![1]!;
+      if (valid === "(none)") continue;
+      const documented = [...help.matchAll(/^flags\{([^}]+)\}:\n(.+)$/gm)].filter((m) => m[1]!.split(",").includes(sub)).map((m) => m[2]).join(" ");
+      for (const flag of valid.split(", ")) expect(documented, `${command} ${sub} ${flag}`).toMatch(new RegExp(`(^|[\\s,(|])${flag}(?![\\w-])`));
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("api --help has examples", async () => {
+    expect((await run("api", "--help")).stdout).toMatch(/^examples\[[2-9]\]:$/m);
+  });
+});
+
 describe("errors and api", () => {
   it("explains a Read token on a write", async () => {
     mockApi([byName("web-1", server("web-1")), { method: "POST", path: "/servers/42/actions/poweroff", status: 403, json: { error: { code: "forbidden", message: "insufficient permissions" } } }]);

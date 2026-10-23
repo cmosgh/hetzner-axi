@@ -49,7 +49,9 @@ flags{list}:
 flags{types}:
   --location <name> (prices and availability there), --arch <x86|arm>, --cpu <shared|dedicated>, --all (include deprecated), --fields <${Object.keys(TYPE_FIELDS).join(",")}>
 flags{create}:
-  --name, --type, --image (required), --location, --ssh-key <name|id> (repeatable), --firewall <name|id> (repeatable), --network <name|id> (repeatable), --label <k=v> (repeatable), --user-data-file <path>, --no-ipv4, --no-ipv6, --stopped, --confirm
+  --name, --type, --image (required), --location, --ssh-key <name|id> (repeatable), --firewall <name|id> (repeatable), --network <name|id> (repeatable), --label <k=v> (repeatable), --user-data-file <path>, --no-ipv4, --no-ipv6, --stopped, --confirm, --no-wait, --wait <seconds>
+flags{poweron}:
+  --no-wait, --wait <seconds>
 flags{shutdown,reboot,poweroff,reset,delete}:
   --confirm (preview without it), --no-wait, --wait <seconds>
 flags{resize}:

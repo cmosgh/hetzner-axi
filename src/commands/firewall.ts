@@ -13,6 +13,8 @@ flags{add-rule,remove-rule}:
   --direction <in|out> (default in), --protocol <tcp|udp|icmp|esp|gre> (required), --port <22|8000-8100|any> (tcp/udp), --source-ip <cidr|any> (repeatable; in), --destination-ip <cidr|any> (repeatable; out), --description <text> (add-rule), --confirm
 flags{apply,remove-from}:
   --server <name|id> | --label <selector>, --confirm
+flags{delete}:
+  --confirm
 notes:
   'any' means 0.0.0.0/0 and ::/0. Rule changes replace the firewall's rule set atomically and are no-ops when the rule already exists (add) or is absent (remove).
   Every change that can open or cut traffic previews until --confirm.
