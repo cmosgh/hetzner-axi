@@ -56,7 +56,10 @@ describe("home", () => {
 describe("server list and view", () => {
   it("lists four default fields and extras by --fields", async () => {
     const { calls } = mockApi([{ path: "/servers", json: page("servers", [server("web-1", { labels: { env: "prod" } })]) }]);
-    expect((await run("server", "list")).stdout).toContain("servers[1]{name,status,type,ipv4}:\n  web-1,running,cx22,203.0.113.10\n");
+    const plain = (await run("server", "list")).stdout;
+    expect(plain).toContain("servers[1]{name,status,type,ipv4}:\n  web-1,running,cx22,203.0.113.10\n");
+    // A complete count is a number, not a quoted string.
+    expect(plain).toMatch(/^count: 1$/m);
     const { stdout } = await run("server", "list", "--label", "env=prod", "--fields", "location,eur_month,labels");
     expect(calls[1]!.url.searchParams.get("label_selector")).toBe("env=prod");
     expect(stdout).toContain("servers[1]{name,status,type,ipv4,location,eur_month,labels}:");
@@ -66,6 +69,7 @@ describe("server list and view", () => {
   it("suggests --limit and --fields reruns that keep the filters", async () => {
     mockApi([{ path: "/servers", json: { servers: [server("web-1")], meta: { pagination: { page: 1, per_page: 1, next_page: 2, last_page: 3, total_entries: 3 } } } }]);
     const { stdout } = await run("server", "list", "--status", "running", "--limit", "1");
+    expect(stdout).toMatch(/^count: 1 of 3 total$/m);
     expect(stdout).toContain("Run `hetzner-axi server list --status running --limit 3` to see all");
     expect(stdout).toContain("Run `hetzner-axi server list --status running --limit 1 --fields eur_month,labels` for cost and labels");
   });
@@ -318,7 +322,9 @@ describe("list --fields", () => {
   it("snapshot lists show four fields and size_gb on request; system lists take no --fields", async () => {
     const snapshot = { id: 70, type: "snapshot", description: "web-1 nightly", image_size: 1.234, created_from: { id: 42, name: "web-1" }, created: new Date().toISOString() };
     const { calls } = mockApi([{ path: "/images", json: page("images", [snapshot]) }]);
-    expect((await run("image", "list", "--type", "snapshot")).stdout).toContain("images[1]{id,description,from,created}:\n  70,web-1 nightly,web-1,just now\n");
+    const listed = (await run("image", "list", "--type", "snapshot")).stdout;
+    expect(listed).toContain("images[1]{id,description,from,created}:\n  70,web-1 nightly,web-1,just now\n");
+    expect(listed).toMatch(/^count: 1$/m);
     expect((await run("image", "list", "--type", "snapshot", "--fields", "size_gb")).stdout).toContain("70,web-1 nightly,web-1,just now,1.23");
     const system = await run("image", "list", "--fields", "size_gb");
     expect(system.exitCode).toBe(2);

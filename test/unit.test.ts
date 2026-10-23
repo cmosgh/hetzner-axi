@@ -5,7 +5,7 @@ import { buildUrl } from "../src/client.js";
 import { keyMaterial } from "../src/commands/catalog.js";
 import { formatTxt, parseTxt, recordName } from "../src/commands/dns.js";
 import { normalizeRule, ruleFromFlags, sameRule } from "../src/commands/firewall.js";
-import { rerunCommand, shellQuote } from "../src/render.js";
+import { countLine, rerunCommand, shellQuote } from "../src/render.js";
 import { formatLabels, monthlyPrice, parseLabels } from "../src/resources.js";
 import { createSkillMarkdown } from "../src/skill.js";
 import { CX22 } from "./helpers.js";
@@ -64,6 +64,13 @@ describe("helpers", () => {
   it("picks gross monthly prices per location", () => {
     expect(monthlyPrice(CX22.prices, "fsn1")).toBe(4.51);
     expect(monthlyPrice(CX22.prices, "nbg1")).toBeUndefined();
+  });
+
+  it("counts a complete list as a number and a partial one against its total", () => {
+    expect(countLine(3, 3, false)).toBe(3);
+    expect(countLine(3, undefined, false)).toBe(3);
+    expect(countLine(50, 120, true)).toBe("50 of 120 total");
+    expect(countLine(50, undefined, true)).toBe("50+ (more available)");
   });
 
   it("compares ssh keys without their comment", () => {

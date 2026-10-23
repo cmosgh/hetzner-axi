@@ -129,12 +129,12 @@ export function extraFields(item: Obj, requested: readonly string[], fields: Fie
   return Object.fromEntries(requested.map((name) => [name, fields[name]?.(item)]));
 }
 
-/** "N of T total" when the backend knows the total, otherwise an honest bound. */
-export function countLine(shown: number, total: number | undefined, more: boolean): string {
+/** A complete list's count as a number; "N of T total" or an honest bound when it is partial. */
+export function countLine(shown: number, total: number | undefined, more: boolean): number | string {
   if (total !== undefined && total >= shown) {
-    return total === shown ? `${shown}` : `${shown} of ${total} total`;
+    return total === shown ? shown : `${shown} of ${total} total`;
   }
-  return more ? `${shown}+ (more available)` : `${shown}`;
+  return more ? `${shown}+ (more available)` : shown;
 }
 
 // --- loose JSON accessors: API payloads are untyped, keep narrowing in one place ---
