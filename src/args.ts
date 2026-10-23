@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { usageError } from "./errors.js";
 
 export interface FlagSpec {
@@ -215,6 +217,31 @@ export function positiveId(raw: string | undefined, label: string): number {
     throw usageError(`invalid ${label} '${raw ?? ""}' - expected a positive number`);
   }
   return Number(cleaned);
+}
+
+const READ_FAILURES: Record<string, string> = {
+  ENOENT: "no such file or directory",
+  EACCES: "permission denied",
+  EPERM: "permission denied",
+  EISDIR: "it is a directory",
+  ENOTDIR: "a parent path is not a directory",
+};
+
+/**
+ * Read the file a flag names (`-` is stdin, `~/` the home directory). Call it
+ * before the first request: a failure is a usage error naming the path and why.
+ */
+export function readFileFlag(name: string, path: string): string {
+  if (path === "-") {
+    if (process.stdin.isTTY) throw usageError(`no input on stdin for ${name} (hetzner-axi never prompts)`);
+    return readFileSync(0, "utf-8");
+  }
+  try {
+    return readFileSync(path.replace(/^~(?=\/)/, homedir()), "utf-8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? "";
+    throw usageError(`cannot read ${name} '${path}' - ${READ_FAILURES[code] ?? (code || "unreadable")}`);
+  }
 }
 
 /** Parse a comma-separated `--fields` value against the supported extras. */

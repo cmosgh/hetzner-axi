@@ -1,5 +1,4 @@
-import { readFileSync } from "node:fs";
-import { bool, enumFlag, expectPositionals, flag, flags, intFlag, parseArgs, parseFields, requireFlag, type ParsedArgs } from "../args.js";
+import { bool, enumFlag, expectPositionals, flag, flags, intFlag, parseArgs, parseFields, readFileFlag, requireFlag, type ParsedArgs } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
 import { arr, block, countLine, helpBlock, num, obj, out, relTime, str, type Obj } from "../render.js";
@@ -278,7 +277,7 @@ async function serverCreate(args: string[]): Promise<string> {
   const location = flag(parsed, "--location");
   const labels = parseLabels(flags(parsed, "--label"));
   const userDataFile = flag(parsed, "--user-data-file");
-  const userData = userDataFile === undefined ? undefined : readFileSync(userDataFile === "-" ? 0 : userDataFile, "utf-8");
+  const userData = userDataFile === undefined ? undefined : readFileFlag("--user-data-file", userDataFile);
   if (bool(parsed, "--no-ipv4") && bool(parsed, "--no-ipv6") && flags(parsed, "--network").length === 0) {
     throw usageError("a server without public IPs needs --network, or it is unreachable");
   }

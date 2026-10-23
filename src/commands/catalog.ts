@@ -1,6 +1,4 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { bool, enumFlag, expectPositionals, flag, intFlag, parseArgs } from "../args.js";
+import { bool, enumFlag, expectPositionals, flag, intFlag, parseArgs, readFileFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { AxiError, usageError } from "../errors.js";
 import { arr, block, countLine, helpBlock, num, obj, out, relTime, str } from "../render.js";
@@ -132,7 +130,7 @@ async function sshKeyAdd(args: string[]): Promise<string> {
   const inline = flag(parsed, "--public-key");
   const file = flag(parsed, "--public-key-file");
   if ((inline === undefined) === (file === undefined)) throw usageError("pass exactly one of --public-key or --public-key-file", [usage]);
-  const publicKey = (inline ?? readFileSync(file!.replace(/^~(?=\/)/, homedir()), "utf-8")).trim();
+  const publicKey = (inline ?? readFileFlag("--public-key-file", file!)).trim();
   if (!/^(ssh-(rsa|ed25519|dss)|ecdsa-sha2-\S+|sk-\S+)\s+[A-Za-z0-9+/=]+/.test(publicKey)) {
     throw usageError("that is not an OpenSSH public key", ["Pass the .pub file, never the private key"]);
   }

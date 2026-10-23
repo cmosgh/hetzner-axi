@@ -1,8 +1,14 @@
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CX22, CX32, done, mockApi, page, run, running, server, useTestEnv } from "./helpers.js";
 
 beforeEach(() => useTestEnv());
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 const byName = (name: string, item: unknown) => ({ path: "/servers", reply: (c: { url: URL }) => ({ json: page("servers", c.url.searchParams.get("name") === name || !c.url.searchParams.get("name") ? [item] : []) }) });
 
@@ -93,6 +99,27 @@ describe("server create", () => {
     expect(stdout).toContain("provisioning: done");
     expect(stdout).toContain("root_password: s3cret");
     expect(stdout).toContain("never shows it again");
+  });
+
+  it("refuses an unreadable --user-data-file before any request", async () => {
+    const { calls } = mockApi(routes());
+    const missing = join(mkdtempSync(join(tmpdir(), "hetzner-axi-test-")), "cloud-init.yml");
+    const { stdout, exitCode } = await run("server", "create", "--name", "web-2", "--type", "cx22", "--image", "ubuntu-24.04", "--user-data-file", missing);
+    expect(exitCode).toBe(2);
+    expect(stdout).toContain("code: VALIDATION_ERROR");
+    expect(stdout).toContain(`cannot read --user-data-file '${missing}' - no such file or directory`);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("sends the --user-data-file contents", async () => {
+    const file = join(mkdtempSync(join(tmpdir(), "hetzner-axi-test-")), "cloud-init.yml");
+    writeFileSync(file, "#cloud-config\npackages: [nginx]\n");
+    const { calls } = mockApi([
+      ...routes(),
+      { method: "POST", path: "/servers", json: { server: server("web-2"), action: done(11, "create_server") } },
+    ]);
+    await run("server", "create", "--name", "web-2", "--type", "cx22", "--image", "ubuntu-24.04", "--user-data-file", file, "--confirm");
+    expect(calls.find((c) => c.method === "POST")!.body).toMatchObject({ user_data: "#cloud-config\npackages: [nginx]\n" });
   });
 
   it("is a no-op when a server with that name exists", async () => {
@@ -262,6 +289,36 @@ describe("ip and volume", () => {
     const { stdout, exitCode } = await run("volume", "resize", "data", "--size", "20");
     expect(exitCode).toBe(2);
     expect(stdout).toContain("volumes only grow");
+  });
+});
+
+describe("ssh-key add", () => {
+  const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial test@example";
+
+  it("names an unreadable --public-key-file and the reason before any request", async () => {
+    const { calls } = mockApi([]);
+    const dir = mkdtempSync(join(tmpdir(), "hetzner-axi-test-"));
+    const missing = await run("ssh-key", "add", "--name", "laptop", "--public-key-file", join(dir, "id_ed25519.pub"));
+    expect(missing.exitCode).toBe(2);
+    expect(missing.stdout).toContain(`cannot read --public-key-file '${join(dir, "id_ed25519.pub")}' - no such file or directory`);
+    const directory = await run("ssh-key", "add", "--name", "laptop", "--public-key-file", dir);
+    expect(directory.exitCode).toBe(2);
+    expect(directory.stdout).toContain(`cannot read --public-key-file '${dir}' - it is a directory`);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("reads a ~/ key file and adds the key", async () => {
+    const home = mkdtempSync(join(tmpdir(), "hetzner-axi-test-"));
+    mkdirSync(join(home, ".ssh"));
+    writeFileSync(join(home, ".ssh", "id_ed25519.pub"), `${KEY}\n`);
+    vi.stubEnv("HOME", home);
+    const { calls } = mockApi([
+      { path: "/ssh_keys", json: page("ssh_keys", []) },
+      { method: "POST", path: "/ssh_keys", json: { ssh_key: { id: 5, name: "laptop", fingerprint: "aa:bb" } } },
+    ]);
+    const { stdout } = await run("ssh-key", "add", "--name", "laptop", "--public-key-file", "~/.ssh/id_ed25519.pub");
+    expect(calls.find((c) => c.method === "POST")!.body).toEqual({ name: "laptop", public_key: KEY });
+    expect(stdout).toContain("result: added");
   });
 });
 
