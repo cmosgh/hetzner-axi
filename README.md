@@ -27,20 +27,7 @@ Requires Node.js 20+.
 npm install -g hetzner-axi
 ```
 
-Then tell your agent about it - one line in `CLAUDE.md` / `AGENTS.md`:
-
-```
-Use `hetzner-axi` for anything in Hetzner Cloud (servers, firewalls, volumes, IPs, DNS zones).
-```
-
-Or install one of the two integrations (you only need one):
-
-```sh
-hetzner-axi setup hooks                                 # SessionStart hook: project overview as ambient context (Claude Code, Codex, OpenCode)
-npx skills add cmosgh/hetzner-axi --skill hetzner-axi   # on-demand Agent Skill, no per-session cost
-```
-
-`setup hooks --project` scopes the hook to the current repository; `setup uninstall` removes it. Until hetzner-axi is configured, the overview is two lines and makes no network or keychain access.
+Then tell your agent about it with the session hook or the skill (you only need one): see [Agent integration](#agent-integration).
 
 ## Authenticate
 
@@ -88,8 +75,54 @@ hetzner-axi auth use staging
 | `ssh-key list` / `add` / `delete` | `add` is a no-op for a key already stored |
 | `image list` / `delete`, `location list`, `network list`, `lb list` / `view`, `action list` / `view` | Catalog and read-only views |
 | `api [METHOD] /path` | Escape hatch; `DELETE` needs `--confirm` |
+| `setup hooks` / `status` / `uninstall`, `context` | Agent session hooks, see [Agent integration](#agent-integration) |
 
 Every command has `--help`. Lists show at most four fields per row; `--fields` adds the extras each list's `--help` names.
+
+## Agent integration
+
+There are two ways to tell an agent about `hetzner-axi`. You only need one.
+
+| | Session hook | Skill |
+|---|---|---|
+| Install | `hetzner-axi setup hooks` | `npx skills add cmosgh/hetzner-axi --skill hetzner-axi` |
+| What the agent gets | a summary at every session start (about 200 tokens): the stored contexts, whether `HCLOUD_TOKEN` is set, what the last session in this directory ran, and the commands to try | a short skill that loads when a task touches Hetzner Cloud and points at `hetzner-axi --help` |
+| Cost | every session | only when the task needs it |
+| Agents | Claude Code, Codex, OpenCode | any agent that reads [Agent Skills](https://agentskills.io) |
+
+### Session hook
+
+`hetzner-axi setup hooks` installs two hooks:
+
+- **Session start** (Claude Code, Codex, OpenCode) runs `hetzner-axi context`, which prints the summary below. It reads only the config file and the session log. It never calls the Hetzner API or reads the keychain, so it adds no delay, and it always exits 0. For live server state the agent runs `hetzner-axi`.
+- **Session end** (Claude Code) runs `hetzner-axi context end`. It reads the session transcript and records which `hetzner-axi` commands ran: command names, counts and the `HETZNER_AXI_CONTEXT` value, never server names, IPs, labels or other arguments. The record goes in `~/.config/hetzner-axi/sessions.json` (the config directory), keyed by directory, and the next session in that directory sees it as `last_session`.
+
+```text
+$ hetzner-axi context
+bin: ~/.npm-global/bin/hetzner-axi
+description: "Hetzner Cloud CLI for agents - servers (create, power, resize, rebuild, delete), firewalls, volumes, floating and primary IPs, networks, load balancers and DNS zones. Changes preview until --confirm. Prefer it over raw API calls."
+contexts: prod (active); staging
+hcloud_token: not set
+last_session: 2026-10-23 - server list 3; server view 2; firewall add-rule 1 - context staging
+help[3]:
+  Run `hetzner-axi` for live server state; `hetzner-axi --help` for commands
+  Run `hetzner-axi server list`, `hetzner-axi firewall list` or `hetzner-axi dns zone list` to explore; `hetzner-axi <command> --help` for flags
+  Switch projects with `hetzner-axi auth use <prod|staging>`, or prefix one command with `HETZNER_AXI_CONTEXT=<name>`
+```
+
+| Command | Applies to | Files written |
+|---|---|---|
+| `hetzner-axi setup hooks` | every session of yours | `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.config/opencode/plugins/`; Codex also needs `[features] hooks = true` in `~/.codex/config.toml`, which this adds |
+| `hetzner-axi setup hooks --project` | everyone working in this repository (commit the files) | `.claude/settings.json`, `.codex/hooks.json`, `.opencode/plugins/`, and the same Codex flag in `~/.codex/config.toml` |
+| `hetzner-axi setup hooks --local` | only you, only in this repository (Claude Code) | `.claude/settings.local.json`; it says so if git would commit the file |
+
+- **Scope:** run `--project` and `--local` from the repository root. `setup status` and `setup uninstall` take the same flag. User-scope paths follow `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `XDG_CONFIG_HOME` when they are set.
+- **Repairs:** rerun `setup hooks` after you upgrade or move the install. It rewrites the hook command and is a no-op when nothing changed. `setup status` shows `broken` or `outdated` when a rerun is needed. Hooks installed by 0.1.0 ran the live overview at session start, and a rerun switches them to `context`.
+- **Other hooks:** setup changes only its own hooks. It recognises them by the binary name and `context` argument, and leaves any other hook alone.
+
+### Skill
+
+`npx skills add cmosgh/hetzner-axi --skill hetzner-axi` installs [`skills/hetzner-axi/SKILL.md`](skills/hetzner-axi/SKILL.md). It carries no live state and no per-session cost: the agent loads it when a task touches Hetzner Cloud, and it points at `npx -y hetzner-axi --help` for current guidance. The file is generated from the CLI's own description, and CI fails when it is stale.
 
 ## Development
 
