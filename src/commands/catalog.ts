@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { bool, enumFlag, expectPositionals, flag, intFlag, parseArgs } from "../args.js";
 import { hcloud, listAll } from "../client.js";
-import { usageError } from "../errors.js";
+import { AxiError, usageError } from "../errors.js";
 import { arr, block, countLine, helpBlock, num, obj, out, relTime, str } from "../render.js";
 import { CONFIRM_FLAG, findOne, formatLabels, parseLabels, preview } from "../resources.js";
 
@@ -246,7 +246,11 @@ export async function actionCommand(args: string[]): Promise<string> {
       ACTION_COLLECTIONS.map((collection) =>
         listAll(`/${collection}/actions`, "actions", { sort: "started:desc", status }, limit).then(
           (p) => p.items,
-          () => [],
+          (error: unknown) => {
+            // A collection the API does not serve has no actions; any other failure (token, network) is the answer.
+            if (error instanceof AxiError && error.code === "NOT_FOUND") return [];
+            throw error;
+          },
         ),
       ),
     );

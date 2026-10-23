@@ -265,6 +265,42 @@ describe("ip and volume", () => {
   });
 });
 
+describe("action list", () => {
+  const action = (id: number, command: string, started: string, type: string, rid: number) => ({ id, command, status: "success", started, resources: [{ id: rid, type }] });
+
+  it("merges collections newest first and counts a 404 collection as empty", async () => {
+    const { calls } = mockApi([
+      { path: "/servers/actions", json: page("actions", [action(2, "start_server", "2026-01-02T00:00:00Z", "server", 42)]) },
+      { path: "/volumes/actions", json: page("actions", [action(3, "attach_volume", "2026-01-03T00:00:00Z", "volume", 6)]) },
+    ]);
+    const { stdout, exitCode } = await run("action", "list");
+    expect(exitCode).toBe(0);
+    expect(calls.some((c) => c.path === "/zones/actions")).toBe(true);
+    expect(stdout.indexOf("attach_volume")).toBeLessThan(stdout.indexOf("start_server"));
+  });
+
+  it("reports a rejected token instead of 0 actions", async () => {
+    mockApi([
+      { path: "/servers/actions", json: page("actions", []) },
+      { path: /^\/\w+\/actions$/, status: 401, json: { error: { code: "unauthorized", message: "unable to authenticate" } } },
+    ]);
+    const { stdout, exitCode } = await run("action", "list");
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("code: AUTH_REQUIRED");
+    expect(stdout).not.toContain("0 actions");
+  });
+
+  it("reports an unreachable API instead of 0 actions", async () => {
+    vi.stubGlobal("fetch", async () => {
+      throw new TypeError("fetch failed");
+    });
+    const { stdout, exitCode } = await run("action", "list", "--running");
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("code: NETWORK");
+    expect(stdout).not.toContain("0 running actions");
+  });
+});
+
 describe("errors and api", () => {
   it("explains a Read token on a write", async () => {
     mockApi([byName("web-1", server("web-1")), { method: "POST", path: "/servers/42/actions/poweroff", status: 403, json: { error: { code: "forbidden", message: "insufficient permissions" } } }]);
