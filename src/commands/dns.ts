@@ -2,7 +2,7 @@ import { bool, expectPositionals, flag, flags, intFlag, parseArgs, requireFlag }
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
 import { arr, block, helpBlock, num, obj, out, relTime, rerunCommand, str, type Obj } from "../render.js";
-import { CONFIRM_FLAG, preview, settle } from "../resources.js";
+import { CONFIRM_FLAG, preview, protectionOffHint, settle } from "../resources.js";
 
 export const DNS_HELP = `usage: hetzner-axi dns <zone|record> <subcommand> [args] [flags]
 subcommands[8]:
@@ -189,7 +189,7 @@ async function zoneDelete(args: string[]): Promise<string> {
   const [ref] = expectPositionals(parsed, 1, `${command} <zone> --confirm`);
   const zone = await findZone(ref!);
   const name = str(zone["name"]);
-  if (obj(zone["protection"])["delete"] === true) throw axiError(`${name} has delete protection`, "PROTECTED");
+  if (obj(zone["protection"])["delete"] === true) throw axiError(`${name} has delete protection`, "PROTECTED", [protectionOffHint(`/zones/${num(zone["id"])}`)]);
   if (!bool(parsed, "--confirm")) return preview({ zone: name, records: num(zone["record_count"]), effect: "deletes the zone and every record; the domain stops resolving if delegated here" }, rerunCommand(command, args));
   const response = await hcloud(`/zones/${num(zone["id"])}`, { method: "DELETE" });
   await settle(response["action"], 60);

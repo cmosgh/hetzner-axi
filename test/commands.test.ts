@@ -455,6 +455,27 @@ describe("ip and volume", () => {
   });
 });
 
+describe("protected volumes and zones", () => {
+  it("point at the api call that turns delete protection off, and that call runs", async () => {
+    const { calls } = mockApi([
+      { path: "/volumes", json: page("volumes", [{ id: 6, name: "data", size: 50, server: null, protection: { delete: true }, location: { name: "fsn1" } }]) },
+      { path: "/zones/example.com", json: { zone: { id: 3, name: "example.com", record_count: 4, protection: { delete: true } } } },
+      { method: "POST", path: "/volumes/6/actions/change_protection", json: { action: done() } },
+    ]);
+    const volume = await run("volume", "delete", "data", "--confirm");
+    expect(volume.exitCode).toBe(1);
+    expect(volume.stdout).toContain("code: PROTECTED");
+    expect(volume.stdout).toContain(`Run \`hetzner-axi api POST /volumes/6/actions/change_protection --data '{"delete":false}'\` first to turn delete protection off`);
+    const zone = await run("dns", "zone", "delete", "example.com", "--confirm");
+    expect(zone.stdout).toContain("code: PROTECTED");
+    expect(zone.stdout).toContain(`Run \`hetzner-axi api POST /zones/3/actions/change_protection --data '{"delete":false}'\` first`);
+    const [, call, data] = /Run `hetzner-axi (api POST \S+) --data '(.+)'` first/.exec(volume.stdout)!;
+    expect((await run(...call!.split(" "), "--data", data!)).exitCode).toBe(0);
+    expect(calls.find((c) => c.method === "POST")).toMatchObject({ path: "/volumes/6/actions/change_protection", body: { delete: false } });
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+});
+
 describe("ssh-key add", () => {
   const KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterial test@example";
 

@@ -86,6 +86,11 @@ export function waitSeconds(parsed: ParsedArgs, fallback = 180): number {
   return flag(parsed, "--wait") === undefined ? fallback : intFlag(parsed, "--wait", fallback, { min: 1, max: 1800 });
 }
 
+/** Volumes and zones have no protect subcommand; the api escape hatch lifts their delete protection. */
+export function protectionOffHint(path: string): string {
+  return `Run \`hetzner-axi api POST ${path}/actions/change_protection --data '{"delete":false}'\` first to turn delete protection off`;
+}
+
 export function preview(what: Obj, rerun: string, extraHelp: string[] = []): string {
   return out(block({ preview: { ...what, result: "NOT executed - add --confirm" } }), helpBlock([`Run \`${rerun} --confirm\` to execute`, ...extraHelp]));
 }

@@ -2,7 +2,7 @@ import { bool, enumFlag, expectPositionals, flag, flags, parseArgs, parseFields,
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
 import { arr, block, extraFields, helpBlock, num, obj, out, rerunCommand, shellQuote, str, type Fields, type Obj } from "../render.js";
-import { CONFIRM_FLAG, findOne, formatLabels, parseLabels, preview, runningHelp, settle, WAIT_FLAGS, waitSeconds } from "../resources.js";
+import { CONFIRM_FLAG, findOne, formatLabels, parseLabels, preview, protectionOffHint, runningHelp, settle, WAIT_FLAGS, waitSeconds } from "../resources.js";
 
 /** `volume list` extras; the default row is name, size_gb, server, location. */
 const LIST_FIELDS: Fields = {
@@ -202,7 +202,7 @@ async function volumeDelete(args: string[]): Promise<string> {
   const volume = await findOne("volumes", "volume", ref!);
   const name = str(volume["name"]);
   if (num(volume["server"])) throw usageError(`${name} is still attached`, [`Run \`hetzner-axi volume detach ${shellQuote(name)} --confirm\` first`]);
-  if (obj(volume["protection"])["delete"] === true) throw axiError(`${name} has delete protection`, "PROTECTED");
+  if (obj(volume["protection"])["delete"] === true) throw axiError(`${name} has delete protection`, "PROTECTED", [protectionOffHint(`/volumes/${num(volume["id"])}`)]);
   if (!bool(parsed, "--confirm")) return preview({ volume: name, size_gb: num(volume["size"]), labels: formatLabels(volume["labels"]), effect: "deletes the volume and its data permanently" }, rerunCommand(command, args));
   await hcloud(`/volumes/${num(volume["id"])}`, { method: "DELETE" });
   return block({ volume: name, result: "deleted" });
