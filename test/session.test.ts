@@ -112,6 +112,20 @@ describe("session capture", () => {
     expect(lastSession("/work/1")).toBeDefined();
     expect(lastSession("/work/100")).toBeDefined();
   });
+
+  it("starts a new log when sessions.json has the wrong shape and skips malformed entries", () => {
+    mkdirSync(configDir(), { recursive: true });
+    for (const content of ['{"directories": null}', '{"directories": [1]}', "null", "not json"]) {
+      writeFileSync(join(configDir(), "sessions.json"), content);
+      expect(lastSession("/work/a")).toBeUndefined();
+      recordSession("/work/a", { ended: "2026-10-01", commands: { "server list": 1 } });
+      expect(lastSession("/work/a")).toMatchObject({ commands: { "server list": 1 } });
+    }
+    for (const entry of ["5", '{"commands": null}', '{"ended": "2026-10-01"}', "[]"]) {
+      writeFileSync(join(configDir(), "sessions.json"), `{"directories": {"/work/a": ${entry}}}`);
+      expect(lastSession("/work/a")).toBeUndefined();
+    }
+  });
 });
 
 describe("hook entries", () => {
@@ -247,6 +261,23 @@ describe("setup", () => {
     expect(stdout).toContain("code: SETUP_FAILED");
     expect(stdout).toContain("hooks.json is not valid JSON");
     expect(findHooks(claude(), "hetzner-axi").start).toBe(`${bin} context`);
+  });
+
+  it("fails with SETUP_FAILED when an uninstall step fails, after removing the rest", async () => {
+    await run("setup", "hooks");
+    writeFileSync(join(home, ".codex", "hooks.json"), "{not json");
+    const plugin = join(home, ".config", "opencode", "plugins", "axi-hetzner-axi.js");
+    const { stdout, exitCode } = await run("setup", "uninstall");
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("code: SETUP_FAILED");
+    expect(stdout).toContain("Codex failed - ");
+    expect(stdout).toContain("(Claude Code and OpenCode done)");
+    expect(stdout).toContain("rerun `hetzner-axi setup uninstall`");
+    expect(claude()).toEqual({});
+    expect(existsSync(plugin)).toBe(false);
+    mkdirSync(plugin);
+    expect((await run("setup", "status")).stdout).toMatch(/opencode: "?unreadable - EISDIR/);
+    expect((await run("setup", "uninstall")).stdout).toContain("OpenCode failed - ");
   });
 
   it("writes project and local scopes under the working directory only", async () => {

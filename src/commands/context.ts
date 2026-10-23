@@ -10,7 +10,7 @@ import { lastSession, recordSession, sessionText, summarizeTranscript, type Comm
 
 export const CONTEXT_HELP = `usage: hetzner-axi context [end]
 What the session-start hook prints: the stored contexts, whether HCLOUD_TOKEN is set and what the last session in this directory ran. It reads only the config file - never the Hetzner API or the keychain - and exits 0.
-\`context end\` is the Claude Code session-end hook: it reads the hook payload on stdin and records the hetzner-axi commands the session ran (names and counts, never arguments).
+\`context end\` is the Claude Code session-end hook: it reads the hook payload on stdin and records the hetzner-axi commands the session ran (names and counts, plus the HETZNER_AXI_CONTEXT used most; never other arguments).
 examples[2]:
   hetzner-axi context
   hetzner-axi setup hooks

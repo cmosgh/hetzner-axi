@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
 import { shouldInstallHooksForNodeAxiExecPath } from "axi-sdk-js";
 import { bool, expectPositionals, parseArgs } from "../args.js";
-import { axiError, usageError } from "../errors.js";
+import { axiError, usageError, type AxiError } from "../errors.js";
 import {
   agentFiles,
   codexHooksEnabled,
@@ -21,6 +21,7 @@ import {
   writeSettings,
   writeText,
   type HookKind,
+  type PluginState,
   type Scope,
 } from "../hooks.js";
 import { block, helpBlock, out, shellQuote, type Obj } from "../render.js";
@@ -31,7 +32,7 @@ const SKILL_INSTALL = `npx skills add cmosgh/${NAME} --skill ${NAME}`;
 
 export const SETUP_HELP = `usage: hetzner-axi setup <hooks|status|uninstall> [--project | --local]
 Opt-in agent hooks. At session start Claude Code, Codex and OpenCode run \`hetzner-axi context\` and add its short summary to the agent's context; it reads only the config file, never the Hetzner API or the keychain.
-At session end Claude Code runs \`hetzner-axi context end\`, which records the hetzner-axi commands the session ran (names and counts, never arguments) for the next session in the same directory.
+At session end Claude Code runs \`hetzner-axi context end\`, which records the hetzner-axi commands the session ran (names and counts, plus the HETZNER_AXI_CONTEXT used most; never other arguments) for the next session in the same directory.
 flags{hooks,status,uninstall}:
   --project (this repository's shared config - .claude/settings.json, .codex/hooks.json, .opencode/plugins/ - instead of your user config), --local (this repository, only for you - Claude Code's .claude/settings.local.json)
 notes:
@@ -85,6 +86,8 @@ function committable(projectDir: string, file: string): boolean {
   return inRepo && spawnSync("git", ["check-ignore", "-q", file], { cwd: projectDir }).status === 1;
 }
 
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 const describeKinds = (kinds: readonly HookKind[]): string => (kinds.length === 2 ? "session start + end" : `session ${kinds[0]}`);
 
 /** An absolute hook binary that no longer exists: hetzner-axi was moved or uninstalled. */
@@ -95,7 +98,12 @@ function missingBin(command: string): string | undefined {
 
 function agentStatus(agent: Agent, files: ReturnType<typeof agentFiles>): string {
   if (agent === "opencode") {
-    const state = pluginState(files.opencode!, NAME);
+    let state: PluginState;
+    try {
+      state = pluginState(files.opencode!, NAME);
+    } catch (error) {
+      return `unreadable - ${messageOf(error)}`;
+    }
     if (state === "missing") return "not installed";
     if (state === "foreign") return `not installed - ${tilde(files.opencode!)} was not written by setup`;
     const bin = pluginCommand(files.opencode!);
@@ -107,7 +115,7 @@ function agentStatus(agent: Agent, files: ReturnType<typeof agentFiles>): string
   try {
     found = findHooks(readSettings(path), NAME);
   } catch (error) {
-    return `unreadable - ${error instanceof Error ? error.message : String(error)}`;
+    return `unreadable - ${messageOf(error)}`;
   }
   const kinds = KINDS[agent].filter((kind) => found[kind] !== undefined);
   if (kinds.length === 0) return "not installed";
@@ -138,60 +146,77 @@ interface Outcome {
   failed?: string;
 }
 
+/** One agent's step: a failure is recorded and the other agents still run. */
+function attempt(outcomes: Outcome[], agent: Agent, step: () => string): void {
+  try {
+    outcomes.push({ agent, result: step() });
+  } catch (error) {
+    outcomes.push({ agent, result: "failed", failed: messageOf(error) });
+  }
+}
+
 function install(scope: Scope, bin: string): Outcome[] {
   const files = agentFiles(NAME, scope, process.cwd());
   const outcomes: Outcome[] = [];
-  const settingsAgent = (agent: Agent, path: string, extra?: () => boolean): void => {
-    try {
+  const settingsAgent = (agent: Agent, path: string, extra?: () => boolean): void =>
+    attempt(outcomes, agent, () => {
       const [updated, changed] = installHooks(readSettings(path), NAME, shellQuote(bin), KINDS[agent]);
       if (changed) writeSettings(path, updated);
       const enabled = extra?.() ?? false;
-      outcomes.push({ agent, result: changed || enabled ? `installed (${describeKinds(KINDS[agent])})` : "already up to date (no-op)" });
-    } catch (error) {
-      outcomes.push({ agent, result: "failed", failed: error instanceof Error ? error.message : String(error) });
-    }
-  };
+      return changed || enabled ? `installed (${describeKinds(KINDS[agent])})` : "already up to date (no-op)";
+    });
   settingsAgent("claude", files.claude);
   if (files.codex) settingsAgent("codex", files.codex, () => enableCodexHooks(files.codexConfig!));
-  if (files.opencode) {
-    const path = files.opencode;
-    try {
-      const state = pluginState(path, NAME, bin);
-      if (state === "foreign") throw new Error(`${path} exists and was not written by setup - remove or rename it`);
-      if (state !== "current") writeText(path, openCodePlugin(NAME, bin));
-      outcomes.push({ agent: "opencode", result: state === "current" ? "already up to date (no-op)" : "installed (session start)" });
-    } catch (error) {
-      outcomes.push({ agent: "opencode", result: "failed", failed: error instanceof Error ? error.message : String(error) });
-    }
+  const plugin = files.opencode;
+  if (plugin) {
+    attempt(outcomes, "opencode", () => {
+      const state = pluginState(plugin, NAME, bin);
+      if (state === "foreign") throw new Error(`${plugin} exists and was not written by setup - remove or rename it`);
+      if (state !== "current") writeText(plugin, openCodePlugin(NAME, bin));
+      return state === "current" ? "already up to date (no-op)" : "installed (session start)";
+    });
   }
   return outcomes;
 }
 
-function uninstall(scope: Scope): Obj {
+function uninstall(scope: Scope): Outcome[] {
   const files = agentFiles(NAME, scope, process.cwd());
-  const hooks: Obj = { scope };
+  const outcomes: Outcome[] = [];
   for (const [agent, path] of [["claude", files.claude], ["codex", files.codex]] as const) {
     if (!path) continue;
-    const key = agent === "claude" ? "claude_code" : agent;
-    try {
+    attempt(outcomes, agent, () => {
       const [updated, changed] = removeHooks(readSettings(path), NAME);
       if (changed) writeSettings(path, updated);
-      hooks[key] = changed ? "removed" : "not installed (no-op)";
-    } catch (error) {
-      hooks[key] = `failed - ${error instanceof Error ? error.message : String(error)}`;
-    }
+      return changed ? "removed" : "not installed (no-op)";
+    });
   }
-  if (files.opencode) {
-    const state = pluginState(files.opencode, NAME);
-    if (state === "foreign") hooks["opencode"] = `kept - ${tilde(files.opencode)} was not written by setup`;
-    else if (state === "missing") hooks["opencode"] = "not installed (no-op)";
-    else {
-      removePlugin(files.opencode);
-      hooks["opencode"] = "removed";
-    }
+  const plugin = files.opencode;
+  if (plugin) {
+    attempt(outcomes, "opencode", () => {
+      const state = pluginState(plugin, NAME);
+      if (state === "foreign") return `kept - ${tilde(plugin)} was not written by setup`;
+      if (state === "missing") return "not installed (no-op)";
+      removePlugin(plugin);
+      return "removed";
+    });
   }
-  return hooks;
+  return outcomes;
 }
+
+/** SETUP_FAILED (exit 1) naming each failed agent and the ones that went through. */
+function setupFailure(outcomes: Outcome[], rerun: string, kept: string): AxiError | undefined {
+  const failed = outcomes.filter((o) => o.failed);
+  if (failed.length === 0) return undefined;
+  const done = outcomes.filter((o) => !o.failed).map((o) => AGENT_NAMES[o.agent]);
+  return axiError(
+    `${failed.map((o) => `${AGENT_NAMES[o.agent]} failed - ${o.failed}`).join("; ")}${done.length > 0 ? ` (${done.join(" and ")} done)` : ""}`,
+    "SETUP_FAILED",
+    [`Fix that, then rerun \`${rerun}\` - ${kept}`],
+  );
+}
+
+const hooksBlock = (scope: Scope, outcomes: Outcome[]): Obj =>
+  Object.fromEntries([["scope", scope], ...outcomes.map((o) => [o.agent === "claude" ? "claude_code" : o.agent, o.result])]);
 
 export async function setupCommand(args: string[]): Promise<string> {
   const [sub, ...rest] = args;
@@ -208,7 +233,12 @@ export async function setupCommand(args: string[]): Promise<string> {
   const rerun = `${command}${scope === "user" ? "" : ` --${scope}`}`;
 
   if (sub === "status") return status(scope);
-  if (sub === "uninstall") return block({ hooks: uninstall(scope) });
+  if (sub === "uninstall") {
+    const outcomes = uninstall(scope);
+    const failure = setupFailure(outcomes, rerun, "hooks already removed stay removed");
+    if (failure) throw failure;
+    return block({ hooks: hooksBlock(scope, outcomes) });
+  }
 
   const execPath = installedExecPath();
   if (!execPath) throw usageError(`run setup from an installed ${NAME} (npm install -g ${NAME}), not from a source checkout`);
@@ -221,17 +251,9 @@ export async function setupCommand(args: string[]): Promise<string> {
   }
   const bin = portableBin(execPath);
   const outcomes = install(scope, bin);
-  const failed = outcomes.filter((o) => o.failed);
-  if (failed.length > 0) {
-    const done = outcomes.filter((o) => !o.failed).map((o) => AGENT_NAMES[o.agent]);
-    throw axiError(
-      `${failed.map((o) => `${AGENT_NAMES[o.agent]} failed - ${o.failed}`).join("; ")}${done.length > 0 ? ` (${done.join(" and ")} done)` : ""}`,
-      "SETUP_FAILED",
-      [`Fix that, then rerun \`${rerun}\` - hooks already in place are left as they are`],
-    );
-  }
-  const hooks: Obj = { scope };
-  for (const o of outcomes) hooks[o.agent === "claude" ? "claude_code" : o.agent] = o.result;
+  const failure = setupFailure(outcomes, rerun, "hooks already in place are left as they are");
+  if (failure) throw failure;
+  const hooks = hooksBlock(scope, outcomes);
   hooks["runs"] = `${bin === NAME ? NAME : tilde(bin)} context`;
   const help: string[] = [];
   const localFile = join(".claude", "settings.local.json");
