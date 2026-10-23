@@ -22,6 +22,36 @@ export function out(...blocks: Array<string | false | undefined>): string {
   return blocks.filter((b): b is string => Boolean(b)).join("\n");
 }
 
+const SHELL_SAFE = /^[\w@%+=:,./-]+$/;
+
+/** POSIX single-quoting, so a suggested command pastes back into a shell unchanged. */
+export function shellQuote(value: string): string {
+  return SHELL_SAFE.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * The invocation as a pasteable hint: every token quoted, `--confirm` dropped
+ * (previews append it), and `set` flags replaced or appended (true = boolean).
+ */
+export function rerunCommand(command: string, args: readonly string[], set: Record<string, string | true> = {}): string {
+  // After a `--` terminator everything is positional and stays as it was.
+  const stop = args.indexOf("--");
+  const end = stop === -1 ? args.length : stop;
+  const kept: string[] = [];
+  for (let i = 0; i < end; i++) {
+    const token = args[i]!;
+    const name = token.split("=")[0]!;
+    if (name === "--confirm") continue;
+    if (name in set) {
+      if (set[name] !== true && !token.includes("=")) i++;
+      continue;
+    }
+    kept.push(token);
+  }
+  const added = Object.entries(set).flatMap(([name, value]) => (value === true ? [name] : [name, value]));
+  return [command, ...[...kept, ...added, ...args.slice(end)].map(shellQuote)].join(" ");
+}
+
 export function renderErrorOutput(
   message: string,
   code: string,

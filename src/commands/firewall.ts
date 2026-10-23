@@ -1,7 +1,7 @@
 import { bool, enumFlag, expectPositionals, flag, flags, parseArgs, requireFlag, type ParsedArgs } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { usageError } from "../errors.js";
-import { arr, block, helpBlock, num, obj, out, str, type Obj } from "../render.js";
+import { arr, block, helpBlock, num, obj, out, rerunCommand, shellQuote, str, type Obj } from "../render.js";
 import { CONFIRM_FLAG, findOne, formatLabels, preview, settle } from "../resources.js";
 
 export const FIREWALL_HELP = `usage: hetzner-axi firewall <subcommand> [args] [flags]
@@ -155,7 +155,7 @@ async function firewallView(args: string[]): Promise<string> {
               })),
       },
     }),
-    helpBlock(["Outbound traffic is allowed unless an out rule exists", `Run \`hetzner-axi firewall add-rule ${str(firewall["name"])} --help\` to change rules`]),
+    helpBlock(["Outbound traffic is allowed unless an out rule exists", `Run \`hetzner-axi firewall add-rule ${shellQuote(str(firewall["name"]))} --help\` to change rules`]),
   );
 }
 
@@ -168,7 +168,7 @@ async function firewallCreate(args: string[]): Promise<string> {
   const existing = arr((await hcloud("/firewalls", { query: { name } }))["firewalls"]).map(obj).find((f) => str(f["name"]) === name);
   if (existing) return block({ firewall: name, result: "already exists (no-op)", rules: arr(existing["rules"]).length });
   await hcloud("/firewalls", { method: "POST", body: { name } });
-  return out(block({ firewall: name, result: "created with 0 rules" }), helpBlock([`Run \`hetzner-axi firewall add-rule ${name} --protocol tcp --port 22 --source-ip any --confirm\` before applying it`]));
+  return out(block({ firewall: name, result: "created with 0 rules" }), helpBlock([`Run \`hetzner-axi firewall add-rule ${shellQuote(name)} --protocol tcp --port 22 --source-ip any --confirm\` before applying it`]));
 }
 
 async function firewallRule(sub: "add-rule" | "remove-rule", args: string[]): Promise<string> {
@@ -187,11 +187,11 @@ async function firewallRule(sub: "add-rule" | "remove-rule", args: string[]): Pr
   const present = rules.some((r) => sameRule(r, rule));
   if (sub === "add-rule" && present) return block({ firewall: name, rule: ruleText(rule), result: "rule already present (no-op)" });
   if (sub === "remove-rule" && !present) {
-    return out(block({ firewall: name, rule: ruleText(rule), result: "no such rule (no-op)" }), helpBlock([`Run \`hetzner-axi firewall view ${name}\` to see the exact rules`]));
+    return out(block({ firewall: name, rule: ruleText(rule), result: "no such rule (no-op)" }), helpBlock([`Run \`hetzner-axi firewall view ${shellQuote(name)}\` to see the exact rules`]));
   }
   const next = sub === "add-rule" ? [...rules, rule] : rules.filter((r) => !sameRule(r, rule));
   if (!bool(parsed, "--confirm")) {
-    return preview({ firewall: name, change: `${sub === "add-rule" ? "add" : "remove"} ${ruleText(rule)}`, rules: `${rules.length} -> ${next.length}`, applied_to: arr(firewall["applied_to"]).length }, `${command} ${args.filter((a) => a !== "--confirm").join(" ")}`);
+    return preview({ firewall: name, change: `${sub === "add-rule" ? "add" : "remove"} ${ruleText(rule)}`, rules: `${rules.length} -> ${next.length}`, applied_to: arr(firewall["applied_to"]).length }, rerunCommand(command, args));
   }
   const body = next.map((r) => ({
     direction: r.direction,
@@ -230,7 +230,7 @@ async function firewallApply(sub: "apply" | "remove-from", args: string[]): Prom
         target: targetText,
         effect: sub === "apply" ? `inbound traffic is limited to the firewall's ${rules} rule${rules === 1 ? "" : "s"}` : "the firewall's rules stop filtering traffic to this target",
       },
-      `${command} ${args.filter((a) => a !== "--confirm").join(" ")}`,
+      rerunCommand(command, args),
       sub === "apply" && !arr(firewall["rules"]).map(obj).some((r) => str(r["port"]) === "22") ? ["Warning: no rule allows SSH (port 22)"] : [],
     );
   }
@@ -248,8 +248,8 @@ async function firewallDelete(args: string[]): Promise<string> {
   const [ref] = expectPositionals(parsed, 1, `${command} <firewall> --confirm`);
   const firewall = await findOne("firewalls", "firewall", ref!);
   const name = str(firewall["name"]);
-  if (arr(firewall["applied_to"]).length > 0) throw usageError(`${name} is still applied`, [`Run \`hetzner-axi firewall view ${name}\` and remove it from each target first`]);
-  if (!bool(parsed, "--confirm")) return preview({ firewall: name, rules: arr(firewall["rules"]).length, effect: "deletes the firewall" }, `${command} ${name}`);
+  if (arr(firewall["applied_to"]).length > 0) throw usageError(`${name} is still applied`, [`Run \`hetzner-axi firewall view ${shellQuote(name)}\` and remove it from each target first`]);
+  if (!bool(parsed, "--confirm")) return preview({ firewall: name, rules: arr(firewall["rules"]).length, effect: "deletes the firewall" }, `${command} ${shellQuote(name)}`);
   await hcloud(`/firewalls/${num(firewall["id"])}`, { method: "DELETE" });
   return block({ firewall: name, result: "deleted" });
 }

@@ -1,7 +1,7 @@
 import { bool, enumFlag, expectPositionals, flag, flags, intFlag, parseArgs, parseFields, readFileFlag, requireFlag, type ParsedArgs } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, str, type Fields, type Obj } from "../render.js";
+import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, rerunCommand, shellQuote, str, type Fields, type Obj } from "../render.js";
 import {
   CONFIRM_FLAG,
   findOne,
@@ -155,8 +155,8 @@ async function serverList(args: string[]): Promise<string> {
     return out(block({ servers: filtered ? "0 servers match these filters" : "0 servers in this project" }), helpBlock(["Run `hetzner-axi server create --help` to create one"]));
   }
   const help = ["Run `hetzner-axi server view <name>` for details"];
-  if ((page.total ?? 0) > page.items.length) help.unshift(`Run \`${command} --limit ${Math.min(1000, page.total ?? 1000)}\` to see all`);
-  if (extras.length === 0) help.push("Add `--fields eur_month,labels` for cost and labels");
+  if ((page.total ?? 0) > page.items.length) help.unshift(`Run \`${rerunCommand(command, args, { "--limit": String(Math.min(1000, page.total ?? 1000)) })}\` to see all`);
+  if (extras.length === 0) help.push(`Run \`${rerunCommand(command, args, { "--fields": "eur_month,labels" })}\` for cost and labels`);
   return out(block({ count: countLine(page.items.length, page.total, false), servers: page.items.map((s) => serverRow(s, extras)) }), helpBlock(help));
 }
 
@@ -335,7 +335,7 @@ async function serverCreate(args: string[]): Promise<string> {
   if (networks.length > 0) summary["networks"] = networks.map((n) => str(n["name"])).join("; ");
   if (Object.keys(labels).length > 0) summary["labels"] = formatLabels(labels);
   if (!bool(parsed, "--confirm")) {
-    return preview(summary, `hetzner-axi server create ${args.filter((a) => a !== "--confirm").map(shellQuote).join(" ")}`, ["Billing starts when the server is created, whether it runs or not"]);
+    return preview(summary, rerunCommand(command, args), ["Billing starts when the server is created, whether it runs or not"]);
   }
 
   const body: Obj = {
@@ -361,10 +361,6 @@ async function serverCreate(args: string[]): Promise<string> {
   if (ipv4(server) !== "none") help.push(`Connect with \`ssh root@${ipv4(server)}\` once it booted`);
   if (password) help.unshift("Store the root password now - Hetzner never shows it again");
   return out(block(response), helpBlock(help));
-}
-
-function shellQuote(value: string): string {
-  return /^[\w@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 // --- power -----------------------------------------------------------------------
@@ -470,7 +466,7 @@ async function serverRebuild(args: string[]): Promise<string> {
     throw axiError(`${name} has rebuild protection`, "PROTECTED", [`Run \`hetzner-axi server protect ${name} --rebuild off\` first`]);
   }
   if (!bool(parsed, "--confirm")) {
-    return preview({ server: name, image: `${imageName(server)} -> ${imageRef}`, effect: "wipes the disk and installs the image; IPs are kept" }, `${command} ${name} --image ${imageRef}`, [
+    return preview({ server: name, image: `${imageName(server)} -> ${imageRef}`, effect: "wipes the disk and installs the image; IPs are kept" }, `${command} ${name} --image ${shellQuote(imageRef)}`, [
       `Run \`hetzner-axi server snapshot ${name}\` first to keep a copy`,
     ]);
   }

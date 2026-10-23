@@ -1,7 +1,7 @@
 import { bool, enumFlag, expectPositionals, flag, flags, parseArgs, parseFields, requireFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { arr, block, extraFields, helpBlock, num, obj, out, str, type Fields, type Obj } from "../render.js";
+import { arr, block, extraFields, helpBlock, num, obj, out, rerunCommand, shellQuote, str, type Fields, type Obj } from "../render.js";
 import { CONFIRM_FLAG, findOne, formatLabels, parseLabels, preview, runningHelp, settle, WAIT_FLAGS, waitSeconds } from "../resources.js";
 
 /** `volume list` extras; the default row is name, size_gb, server, location. */
@@ -118,7 +118,7 @@ async function volumeCreate(args: string[]): Promise<string> {
     format: format ?? "none (unformatted)",
     eur_month: (await volumePrice(size)) ?? "unknown",
   };
-  if (!bool(parsed, "--confirm")) return preview(summary, `${command} ${args.filter((a) => a !== "--confirm").join(" ")}`);
+  if (!bool(parsed, "--confirm")) return preview(summary, rerunCommand(command, args));
   const created = await hcloud("/volumes", {
     method: "POST",
     body: {
@@ -133,9 +133,10 @@ async function volumeCreate(args: string[]): Promise<string> {
   const volume = obj(created["volume"]);
   const { result, text } = await settle(created["action"], seconds);
   for (const next of arr(created["next_actions"])) await settle(next, seconds);
+  const mountpoint = shellQuote(`/mnt/${name}`);
   return out(
     block({ volume: name, result: `created (${text})`, id: num(volume["id"]), device: str(volume["linux_device"]), eur_month: summary["eur_month"] }),
-    helpBlock([...runningHelp(result), ...(server && !bool(parsed, "--automount") ? [`Mount it on ${str(server["name"])}: mkdir -p /mnt/${name} && mount ${str(volume["linux_device"])} /mnt/${name}`] : [])]),
+    helpBlock([...runningHelp(result), ...(server && !bool(parsed, "--automount") ? [`Mount it on ${str(server["name"])}: mkdir -p ${mountpoint} && mount ${str(volume["linux_device"])} ${mountpoint}`] : [])]),
   );
 }
 
@@ -148,7 +149,7 @@ async function volumeAttach(args: string[]): Promise<string> {
   const [volume, server] = await Promise.all([findOne("volumes", "volume", ref!), findOne("servers", "server", serverRef)]);
   const name = str(volume["name"]);
   if (num(volume["server"]) === num(server["id"])) return block({ volume: name, server: str(server["name"]), result: "already attached (no-op)" });
-  if (num(volume["server"])) throw usageError(`${name} is attached to server ${num(volume["server"])}`, [`Run \`hetzner-axi volume detach ${name} --confirm\` first`]);
+  if (num(volume["server"])) throw usageError(`${name} is attached to server ${num(volume["server"])}`, [`Run \`hetzner-axi volume detach ${shellQuote(name)} --confirm\` first`]);
   if (str(obj(volume["location"])["name"]) !== str(obj(server["location"])["name"])) {
     throw usageError(`${name} is in ${str(obj(volume["location"])["name"])} but ${str(server["name"])} is in ${str(obj(server["location"])["name"])}`);
   }
@@ -165,7 +166,7 @@ async function volumeDetach(args: string[]): Promise<string> {
   const name = str(volume["name"]);
   if (!num(volume["server"])) return block({ volume: name, result: "already detached (no-op)" });
   if (!bool(parsed, "--confirm")) {
-    return preview({ volume: name, server: num(volume["server"]), effect: "detaches the block device; unmount it on the server first" }, `${command} ${name}`);
+    return preview({ volume: name, server: num(volume["server"]), effect: "detaches the block device; unmount it on the server first" }, `${command} ${shellQuote(name)}`);
   }
   const response = await hcloud(`/volumes/${num(volume["id"])}/actions/detach`, { method: "POST" });
   const { result, text } = await settle(response["action"], waitSeconds(parsed));
@@ -184,7 +185,7 @@ async function volumeResize(args: string[]): Promise<string> {
   if (size === current) return block({ volume: name, size_gb: current, result: "already this size (no-op)" });
   if (size < current) throw usageError(`volumes only grow; ${name} is ${current} GB`);
   if (!bool(parsed, "--confirm")) {
-    return preview({ volume: name, size_gb: `${current} -> ${size}`, eur_month: `${(await volumePrice(current)) ?? "?"} -> ${(await volumePrice(size)) ?? "?"}`, effect: "cannot be shrunk again" }, `${command} ${name} --size ${size}`);
+    return preview({ volume: name, size_gb: `${current} -> ${size}`, eur_month: `${(await volumePrice(current)) ?? "?"} -> ${(await volumePrice(size)) ?? "?"}`, effect: "cannot be shrunk again" }, `${command} ${shellQuote(name)} --size ${size}`);
   }
   const response = await hcloud(`/volumes/${num(volume["id"])}/actions/resize`, { method: "POST", body: { size } });
   const { result, text } = await settle(response["action"], waitSeconds(parsed));
@@ -197,9 +198,9 @@ async function volumeDelete(args: string[]): Promise<string> {
   const [ref] = expectPositionals(parsed, 1, `${command} <volume> --confirm`);
   const volume = await findOne("volumes", "volume", ref!);
   const name = str(volume["name"]);
-  if (num(volume["server"])) throw usageError(`${name} is still attached`, [`Run \`hetzner-axi volume detach ${name} --confirm\` first`]);
+  if (num(volume["server"])) throw usageError(`${name} is still attached`, [`Run \`hetzner-axi volume detach ${shellQuote(name)} --confirm\` first`]);
   if (obj(volume["protection"])["delete"] === true) throw axiError(`${name} has delete protection`, "PROTECTED");
-  if (!bool(parsed, "--confirm")) return preview({ volume: name, size_gb: num(volume["size"]), labels: formatLabels(volume["labels"]), effect: "deletes the volume and its data permanently" }, `${command} ${name}`);
+  if (!bool(parsed, "--confirm")) return preview({ volume: name, size_gb: num(volume["size"]), labels: formatLabels(volume["labels"]), effect: "deletes the volume and its data permanently" }, `${command} ${shellQuote(name)}`);
   await hcloud(`/volumes/${num(volume["id"])}`, { method: "DELETE" });
   return block({ volume: name, result: "deleted" });
 }

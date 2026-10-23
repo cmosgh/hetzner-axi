@@ -3,6 +3,16 @@ import { hcloud, listAll, waitAction, type ActionResult } from "./client.js";
 import { axiError, usageError } from "./errors.js";
 import { arr, block, helpBlock, num, obj, out, str, type Obj } from "./render.js";
 
+/** The CLI noun that lists each collection findOne() resolves. */
+const LIST_NOUNS: Record<string, string> = {
+  servers: "server",
+  firewalls: "firewall",
+  volumes: "volume",
+  ssh_keys: "ssh-key",
+  networks: "network",
+  load_balancers: "lb",
+};
+
 /** Resolve a resource by numeric id or exact name; misses list close names. */
 export async function findOne(collection: string, key: string, ref: string, label = key.replace(/_/g, " ")): Promise<Obj> {
   if (/^\d+$/.test(ref)) {
@@ -18,9 +28,10 @@ export async function findOne(collection: string, key: string, ref: string, labe
   if (match) return match;
   const all = (await listAll(`/${collection}`, `${key}s`, {}, 200)).items.map((item) => str(item["name"]));
   const close = all.filter((name) => name.toLowerCase().includes(ref.toLowerCase()) || ref.toLowerCase().includes(name.toLowerCase()));
+  const noun = LIST_NOUNS[collection];
   throw axiError(`no ${label} named '${ref}'`, "NOT_FOUND", [
     ...(close.length > 0 ? [`did you mean: ${close.slice(0, 5).join(", ")}`] : all.length > 0 ? [`${all.length} ${label}s exist: ${all.slice(0, 8).join(", ")}${all.length > 8 ? ", ..." : ""}`] : [`0 ${label}s in this project`]),
-    `Run \`hetzner-axi ${collection.replace(/_/g, "-").replace(/s$/, "")} list\``,
+    ...(noun ? [`Run \`hetzner-axi ${noun} list\``] : []),
   ]);
 }
 

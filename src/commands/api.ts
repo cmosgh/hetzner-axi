@@ -1,7 +1,7 @@
 import { bool, flag, parseArgs } from "../args.js";
 import { hcloud } from "../client.js";
 import { usageError } from "../errors.js";
-import { block, helpBlock, out, type Obj } from "../render.js";
+import { block, helpBlock, out, rerunCommand, type Obj } from "../render.js";
 
 export const API_HELP = `usage: hetzner-axi api [GET|POST|PUT|DELETE] <path> [flags]
 Escape hatch for any Hetzner Cloud API endpoint (paths below https://api.hetzner.cloud/v1), sent with the active context's token.
@@ -95,7 +95,7 @@ export async function apiCommand(args: string[]): Promise<string> {
   if (method === "DELETE" && !bool(parsed, "--confirm")) {
     return out(
       block({ delete_preview: { path, result: "NOT executed - DELETE needs --confirm" } }),
-      helpBlock([`Run \`${command} DELETE ${positionals[0]} --confirm\` to execute`]),
+      helpBlock([`Run \`${rerunCommand(command, args)} --confirm\` to execute`]),
     );
   }
 
@@ -106,8 +106,10 @@ export async function apiCommand(args: string[]): Promise<string> {
     shown !== null && typeof shown === "object" && !Array.isArray(shown)
       ? (shown as Obj)
       : { result: shown };
+  // Only a read is safe to suggest again; a repeated write would act twice.
+  const full = method === "GET" ? `run \`${rerunCommand(command, args, { "--full": true })}\`` : "add `--full` next time";
   return out(
     block(Object.keys(payload).length === 0 ? { result: `${method} ${path} succeeded (empty response)` } : payload),
-    helpBlock(stats.cut ? ["Long strings/arrays were truncated and per-location prices dropped; add `--full` for the raw payload"] : []),
+    helpBlock(stats.cut ? [`Long strings/arrays were truncated and per-location prices dropped; ${full} for the raw payload`] : []),
   );
 }

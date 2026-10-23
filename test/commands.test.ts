@@ -41,6 +41,13 @@ describe("server list and view", () => {
     expect(stdout).toContain("web-1,running,cx22,203.0.113.10,fsn1,4.51,env=prod");
   });
 
+  it("suggests --limit and --fields reruns that keep the filters", async () => {
+    mockApi([{ path: "/servers", json: { servers: [server("web-1")], meta: { pagination: { page: 1, per_page: 1, next_page: 2, last_page: 3, total_entries: 3 } } } }]);
+    const { stdout } = await run("server", "list", "--status", "running", "--limit", "1");
+    expect(stdout).toContain("Run `hetzner-axi server list --status running --limit 3` to see all");
+    expect(stdout).toContain("Run `hetzner-axi server list --status running --limit 1 --fields eur_month,labels` for cost and labels");
+  });
+
   it("rejects an unknown --fields value before any request", async () => {
     const { calls } = mockApi([]);
     const { stdout, exitCode } = await run("server", "list", "--fields", "cost");
@@ -297,6 +304,14 @@ describe("firewall", () => {
     expect(body.rules[1]).toEqual({ direction: "in", protocol: "tcp", port: "443", source_ips: ["0.0.0.0/0", "::/0"] });
   });
 
+  it("previews reruns that keep a --description or --label with spaces intact", async () => {
+    mockApi([{ path: "/firewalls", json: page("firewalls", [fw]) }]);
+    const rule = await run("firewall", "add-rule", "web", "--protocol", "tcp", "--port", "443", "--source-ip", "any", "--description", "allow web");
+    expect(rule.stdout).toContain("Run `hetzner-axi firewall add-rule web --protocol tcp --port 443 --source-ip any --description 'allow web' --confirm` to execute");
+    const apply = await run("firewall", "apply", "web", "--label", "env in (prod,staging)");
+    expect(apply.stdout).toContain("Run `hetzner-axi firewall apply web --label 'env in (prod,staging)' --confirm` to execute");
+  });
+
   it("validates rule flags before any request", async () => {
     const { calls } = mockApi([]);
     const { stdout, exitCode } = await run("firewall", "add-rule", "web", "--protocol", "icmp", "--port", "22", "--source-ip", "any");
@@ -338,6 +353,13 @@ describe("dns", () => {
     expect(stdout).toContain("result: updated");
   });
 
+  it("set previews pasteable set and add commands for a value with quotes", async () => {
+    mockApi([zoneRoute, { path: "/zones/3/rrsets/@/TXT", json: { rrset: { name: "@", type: "TXT", ttl: 300, records: [{ value: '"old"' }] } } }]);
+    const { stdout } = await run("dns", "record", "set", "example.com", "@", "TXT", "--record", `it's "new"`);
+    expect(stdout).toContain(`Run \`hetzner-axi dns record set example.com @ TXT --record 'it'\\''s "new"' --confirm\` to execute`);
+    expect(stdout).toContain(`Run \`hetzner-axi dns record add example.com @ TXT --record 'it'\\''s "new"'\` instead to keep the existing values`);
+  });
+
   it("remove of a missing record set is a no-op", async () => {
     mockApi([zoneRoute]);
     const { stdout } = await run("dns", "record", "remove", "example.com", "old", "CNAME", "--confirm");
@@ -355,6 +377,23 @@ describe("ip and volume", () => {
     ]);
     await run("ip", "assign", "198.51.100.5", "--server", "web-1", "--confirm");
     expect(calls.find((c) => c.method === "POST")!.body).toEqual({ server: 42 });
+  });
+
+  it("volume create previews a rerun that keeps a --label with spaces intact", async () => {
+    mockApi([
+      { path: "/volumes", json: page("volumes", []) },
+      { path: "/pricing", json: { pricing: { volume: { price_per_gb_month: { gross: "0.0524" } } } } },
+    ]);
+    const { stdout } = await run("volume", "create", "--name", "data", "--size", "10", "--location", "fsn1", "--label", "team=core infra");
+    expect(stdout).toContain("Run `hetzner-axi volume create --name data --size 10 --location fsn1 --label 'team=core infra' --confirm` to execute");
+  });
+
+  it("lb view points a miss at lb list", async () => {
+    mockApi([{ path: "/load_balancers", json: page("load_balancers", [{ id: 4, name: "web-lb" }]) }]);
+    const { stdout, exitCode } = await run("lb", "view", "api-lb");
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("Run `hetzner-axi lb list`");
+    expect(stdout).not.toContain("load-balancer");
   });
 
   it("volume resize only grows", async () => {
@@ -439,10 +478,18 @@ describe("errors and api", () => {
     expect(stdout).toContain("Read & Write token");
   });
 
-  it("api refuses absolute URLs and previews DELETE", async () => {
+  it("api refuses absolute URLs and previews DELETE with the full rerun", async () => {
     const { calls } = mockApi([]);
     expect((await run("api", "https://evil.example/x")).exitCode).toBe(2);
-    expect((await run("api", "DELETE", "/servers/42")).stdout).toContain("NOT executed");
+    const { stdout } = await run("api", "DELETE", "/servers/42", "--query", "force=true");
+    expect(stdout).toContain("NOT executed");
+    expect(stdout).toContain("Run `hetzner-axi api DELETE /servers/42 --query force=true --confirm` to execute");
     expect(calls).toHaveLength(0);
+  });
+
+  it("api suggests a --full rerun for a truncated read", async () => {
+    mockApi([{ path: "/server_types", json: page("server_types", [CX22]) }]);
+    const { stdout } = await run("api", "/server_types", "--query", "name=cx22");
+    expect(stdout).toContain("run `hetzner-axi api /server_types --query name=cx22 --full` for the raw payload");
   });
 });

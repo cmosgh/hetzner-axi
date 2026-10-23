@@ -1,7 +1,7 @@
 import { bool, expectPositionals, flag, flags, intFlag, parseArgs, requireFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { arr, block, helpBlock, num, obj, out, relTime, str, type Obj } from "../render.js";
+import { arr, block, helpBlock, num, obj, out, relTime, rerunCommand, str, type Obj } from "../render.js";
 import { CONFIRM_FLAG, preview, settle } from "../resources.js";
 
 export const DNS_HELP = `usage: hetzner-axi dns <zone|record> <subcommand> [args] [flags]
@@ -271,8 +271,8 @@ async function recordWrite(sub: "set" | "add", args: string[]): Promise<string> 
   if (sub === "set" && extra.length > 0 && !bool(parsed, "--confirm")) {
     return preview(
       { record: label, from: current.map((v) => display(type, v)).join(" | "), to: wanted.map((v) => display(type, v)).join(" | "), ...(ttlChange ? { ttl: `${num(existing["ttl"]) ?? "zone default"} -> ${ttl}` } : {}) },
-      `${command} ${args.filter((a) => a !== "--confirm").map((a) => (/\s/.test(a) ? `'${a}'` : a)).join(" ")}`,
-      ["Use `dns record add` to keep the existing values"],
+      rerunCommand(command, args),
+      [`Run \`${rerunCommand("hetzner-axi dns record add", args)}\` instead to keep the existing values`],
     );
   }
   const path = `/zones/${zoneId}/rrsets/${rrPath(name)}/${type}/actions`;
@@ -307,7 +307,7 @@ async function recordRemove(args: string[]): Promise<string> {
   if (matched.length === 0) return block({ record: label, values: current.map((v) => display(type, v)).join(" | "), result: "none of these values are present (no-op)" });
   const whole = matched.length === current.length;
   if (!bool(parsed, "--confirm")) {
-    return preview({ record: label, remove: matched.map((v) => display(type, v)).join(" | "), effect: whole ? "deletes the whole record set" : `keeps ${current.length - matched.length} other value(s)` }, `${command} ${args.filter((a) => a !== "--confirm").map((a) => (/\s/.test(a) ? `'${a}'` : a)).join(" ")}`);
+    return preview({ record: label, remove: matched.map((v) => display(type, v)).join(" | "), effect: whole ? "deletes the whole record set" : `keeps ${current.length - matched.length} other value(s)` }, rerunCommand(command, args));
   }
   const path = `/zones/${zoneId}/rrsets/${rrPath(name)}/${type}`;
   const response = whole ? await hcloud(path, { method: "DELETE" }) : await hcloud(`${path}/actions/remove_records`, { method: "POST", body: { records: matched.map((value) => ({ value })) } });
