@@ -1,10 +1,32 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readConfig, writeConfig } from "../src/config.js";
+import { clearToken, storeToken } from "../src/credentials.js";
 import { CX22, CX32, done, mockApi, page, run, running, server, useTestEnv } from "./helpers.js";
 
-beforeEach(() => useTestEnv());
+// Stands in for the OS keychain so no test can reach the real one; records every entry opened.
+const keychain = vi.hoisted(() => ({ opened: [] as string[] }));
+vi.mock("@napi-rs/keyring", () => ({
+  Entry: class {
+    constructor(service: string, account: string) {
+      keychain.opened.push(`${service}/${account}`);
+    }
+    getPassword(): string | null {
+      return null;
+    }
+    setPassword(): void {}
+    deletePassword(): boolean {
+      return false;
+    }
+  },
+}));
+
+beforeEach(() => {
+  useTestEnv();
+  keychain.opened.length = 0;
+});
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -467,6 +489,52 @@ describe("action list", () => {
     expect(exitCode).toBe(1);
     expect(stdout).toContain("code: NETWORK");
     expect(stdout).not.toContain("0 running actions");
+  });
+});
+
+describe("auth with HETZNER_AXI_NO_KEYCHAIN=1", () => {
+  it("login is refused before the token is read or sent, and nothing is stored", async () => {
+    const { calls } = mockApi([]);
+    const { stdout, exitCode } = await run("auth", "login", "--context", "prod", "--token-stdin");
+    expect(exitCode).toBe(2);
+    expect(stdout).toContain("code: VALIDATION_ERROR");
+    expect(stdout).toContain("HETZNER_AXI_NO_KEYCHAIN=1 disables the OS keychain so auth login cannot store the token");
+    expect(stdout).toContain("Set HCLOUD_TOKEN in the environment instead");
+    expect(calls).toHaveLength(0);
+    expect(keychain.opened).toHaveLength(0);
+    expect(existsSync(join(process.env["HETZNER_AXI_CONFIG_DIR"]!, "config.json"))).toBe(false);
+  });
+
+  it("logout is refused and keeps the context", async () => {
+    writeConfig({ active: "prod", contexts: ["prod"] });
+    const { stdout, exitCode } = await run("auth", "logout", "--context", "prod");
+    expect(exitCode).toBe(2);
+    expect(stdout).toContain("the token of context 'prod' cannot be removed");
+    expect(stdout).toContain("Unset HETZNER_AXI_NO_KEYCHAIN and run `hetzner-axi auth logout --context prod`");
+    expect(keychain.opened).toHaveLength(0);
+    expect(readConfig()).toEqual({ active: "prod", contexts: ["prod"] });
+  });
+
+  it("storeToken and clearToken never open the keychain", async () => {
+    await expect(storeToken("prod", "test-token")).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    await expect(clearToken("prod")).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(keychain.opened).toHaveLength(0);
+  });
+
+  it("without HCLOUD_TOKEN, commands and auth status point at HCLOUD_TOKEN, not auth login", async () => {
+    delete process.env["HCLOUD_TOKEN"];
+    writeConfig({ active: "prod", contexts: ["prod"] });
+    const { calls } = mockApi([]);
+    const list = await run("server", "list");
+    expect(list.exitCode).toBe(1);
+    expect(list.stdout).toContain("code: AUTH_REQUIRED");
+    expect(list.stdout).toContain("Set HCLOUD_TOKEN in the environment");
+    expect(list.stdout).not.toContain("auth login");
+    const status = await run("auth", "status");
+    expect(status.stdout).toContain("HCLOUD_TOKEN is not set and HETZNER_AXI_NO_KEYCHAIN=1 keeps the keychain off");
+    expect(status.stdout).not.toContain("auth login");
+    expect(calls).toHaveLength(0);
+    expect(keychain.opened).toHaveLength(0);
   });
 });
 

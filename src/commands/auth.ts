@@ -2,7 +2,19 @@ import { readFileSync } from "node:fs";
 import { bool, expectPositionals, flag, parseArgs, requireFlag } from "../args.js";
 import { hcloud } from "../client.js";
 import { readConfig, writeConfig } from "../config.js";
-import { clearToken, LOGIN_HINT, resolveCredentials, selectedContext, storeToken, validContextName, type Credentials } from "../credentials.js";
+import {
+  assertCanStoreToken,
+  clearToken,
+  KEYCHAIN_OFF_HELP,
+  KEYCHAIN_OFF_STATUS,
+  keychainDisabled,
+  LOGIN_HINT,
+  resolveCredentials,
+  selectedContext,
+  storeToken,
+  validContextName,
+  type Credentials,
+} from "../credentials.js";
 import { AxiError, usageError } from "../errors.js";
 import { block, helpBlock, num, obj, out } from "../render.js";
 
@@ -16,6 +28,7 @@ flags{logout}:
 notes:
   Hetzner Cloud tokens belong to one project: store one context per project and switch with \`auth use\`. Create tokens in the Cloud Console under Security - API tokens; a Read token is enough for everything except changes.
   Tokens are stored in the OS keychain. HCLOUD_TOKEN (shared with the hcloud CLI) overrides them; HETZNER_AXI_CONTEXT picks a stored context for one command.
+  HETZNER_AXI_NO_KEYCHAIN=1 never reads or writes the keychain, so login and logout are refused; use HCLOUD_TOKEN with it.
 examples[4]:
   pbpaste | hetzner-axi auth login --context prod --token-stdin
   hetzner-axi auth status
@@ -59,6 +72,7 @@ async function authStatus(args: string[]): Promise<string> {
   const credentials = await resolveCredentials();
   const contexts = (config.contexts ?? []).map((c) => (c === config.active ? `${c} (active)` : c)).join("; ") || "none";
   if (!credentials) {
+    if (keychainDisabled()) return out(block({ auth: { status: KEYCHAIN_OFF_STATUS, contexts } }), helpBlock(KEYCHAIN_OFF_HELP));
     const context = selectedContext();
     return out(block({ auth: { status: context ? `no token stored for context '${context}'` : "not authenticated", contexts } }), helpBlock([LOGIN_HINT]));
   }
@@ -88,6 +102,7 @@ async function authLogin(args: string[]): Promise<string> {
   const context = requireFlag(parsed, "--context", usage);
   if (!validContextName(context)) throw usageError(`invalid context name '${context}' - use letters, digits, '.', '_' and '-'`);
   if (!bool(parsed, "--token-stdin")) throw usageError("--token-stdin is required: the token is only ever read from stdin", [usage]);
+  assertCanStoreToken();
   if (process.stdin.isTTY) throw usageError("no token on stdin (hetzner-axi never prompts)", [usage]);
   const token = readFileSync(0, "utf-8").trim();
   if (token === "") throw usageError("the token read from stdin is empty", [usage]);

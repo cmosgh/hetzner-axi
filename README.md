@@ -59,7 +59,7 @@ hetzner-axi auth use staging
 | --- | --- |
 | `HCLOUD_TOKEN` | Token to use; overrides stored contexts (same variable as the `hcloud` CLI) |
 | `HETZNER_AXI_CONTEXT` | Stored context for one command, without switching the active one |
-| `HETZNER_AXI_NO_KEYCHAIN` | `1` never reads or writes the OS keychain |
+| `HETZNER_AXI_NO_KEYCHAIN` | `1` never reads or writes the OS keychain: pair it with `HCLOUD_TOKEN`; `auth login` and `auth logout` are refused |
 | `HETZNER_AXI_CONFIG_DIR` | Config directory (default `$XDG_CONFIG_HOME/hetzner-axi` or `~/.config/hetzner-axi`) |
 
 ## Commands
