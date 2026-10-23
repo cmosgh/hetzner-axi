@@ -207,6 +207,29 @@ describe("server power and lifecycle", () => {
     expect(stdout).toContain("server shutdown web-1 --confirm");
   });
 
+  it("previews repeat the exact command, --wait and --no-wait included", async () => {
+    const { calls } = mockApi([
+      { path: "/servers", reply: (c) => ({ json: page("servers", [server("web-1"), server("db-1", { id: 43, status: "off" })].filter((s) => s["name"] === c.url.searchParams.get("name"))) }) },
+      { path: "/servers/42", json: { server: server("web-1") } },
+      { path: "/server_types", json: page("server_types", [CX32]) },
+      { path: "/volumes", json: page("volumes", [{ id: 6, name: "data", size: 50, server: 42, location: { name: "fsn1" } }]) },
+      { path: "/pricing", json: { pricing: { volume: { price_per_gb_month: { gross: "0.0524" } } } } },
+      { path: "/floating_ips", json: page("floating_ips", [{ id: 8, ip: "198.51.100.5", name: "vip", server: 42, home_location: { name: "fsn1" } }]) },
+      { path: "/primary_ips", json: page("primary_ips", []) },
+    ]);
+    const reruns: Array<[string[], string]> = [
+      [["server", "reboot", "web-1", "--wait", "30"], "hetzner-axi server reboot web-1 --wait 30"],
+      [["server", "resize", "db-1", "--type", "cx32", "--no-wait"], "hetzner-axi server resize db-1 --type cx32 --no-wait"],
+      [["server", "rebuild", "web-1", "--wait=120", "--image", "ubuntu-24.04"], "hetzner-axi server rebuild web-1 --wait=120 --image ubuntu-24.04"],
+      [["server", "delete", "42", "--no-wait"], "hetzner-axi server delete 42 --no-wait"],
+      [["volume", "detach", "data", "--no-wait"], "hetzner-axi volume detach data --no-wait"],
+      [["volume", "resize", "data", "--size", "100", "--wait", "60"], "hetzner-axi volume resize data --size 100 --wait 60"],
+      [["ip", "unassign", "198.51.100.5", "--wait", "30"], "hetzner-axi ip unassign 198.51.100.5 --wait 30"],
+    ];
+    for (const [argv, rerun] of reruns) expect((await run(...argv)).stdout, argv.join(" ")).toContain(`Run \`${rerun} --confirm\` to execute`);
+    expect(calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
   it("refuses to delete a protected server before previewing", async () => {
     mockApi([byName("db-1", server("db-1", { protection: { delete: true, rebuild: true } }))]);
     const { stdout, exitCode } = await run("server", "delete", "db-1", "--confirm");

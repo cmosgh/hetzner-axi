@@ -251,7 +251,7 @@ async function firewallDelete(args: string[]): Promise<string> {
   const firewall = await findOne("firewalls", "firewall", ref!);
   const name = str(firewall["name"]);
   if (arr(firewall["applied_to"]).length > 0) throw usageError(`${name} is still applied`, [`Run \`hetzner-axi firewall view ${shellQuote(name)}\` and remove it from each target first`]);
-  if (!bool(parsed, "--confirm")) return preview({ firewall: name, rules: arr(firewall["rules"]).length, effect: "deletes the firewall" }, `${command} ${shellQuote(name)}`);
+  if (!bool(parsed, "--confirm")) return preview({ firewall: name, rules: arr(firewall["rules"]).length, effect: "deletes the firewall" }, rerunCommand(command, args));
   await hcloud(`/firewalls/${num(firewall["id"])}`, { method: "DELETE" });
   return block({ firewall: name, result: "deleted" });
 }

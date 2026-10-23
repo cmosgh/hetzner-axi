@@ -1,7 +1,7 @@
 import { bool, enumFlag, expectPositionals, flag, flags, intFlag, parseArgs, parseFields, readFileFlag, requireFlag, type ParsedArgs } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, rerunCommand, shellQuote, str, type Fields, type Obj } from "../render.js";
+import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, rerunCommand, str, type Fields, type Obj } from "../render.js";
 import {
   CONFIRM_FLAG,
   findOne,
@@ -404,7 +404,7 @@ async function serverPower(action: PowerAction, args: string[]): Promise<string>
     throw usageError(`${name} is ${status}; ${action} needs a ${spec.needs} server`, status === "off" ? [`Run \`hetzner-axi server poweron ${name}\``] : ["Retry once the current action finished"]);
   }
   if (spec.confirm && !bool(parsed, "--confirm")) {
-    return preview({ server: name, status, action, effect: spec.effect }, `${command} ${name}`, action === "poweroff" ? [`Prefer \`hetzner-axi server shutdown ${name}\` for a graceful stop`] : []);
+    return preview({ server: name, status, action, effect: spec.effect }, rerunCommand(command, args), action === "poweroff" ? [`Prefer \`hetzner-axi server shutdown ${name}\` for a graceful stop`] : []);
   }
   const response = await hcloud(`/servers/${id}/actions/${action}`, { method: "POST" });
   const { result, text } = await settle(response["action"], seconds);
@@ -447,7 +447,7 @@ async function serverResize(args: string[]): Promise<string> {
         disk: keepDisk ? "kept at the current size (the server can be downsized again)" : "upgraded - the server can never move back to a smaller disk",
         eur_month: `${monthlyPrice(current["prices"], location) ?? "?"} -> ${monthlyPrice(type["prices"], location) ?? "?"}`,
       },
-      `${command} ${name} --type ${typeRef}${keepDisk ? "" : " --upgrade-disk"}`,
+      rerunCommand(command, args),
     );
   }
   const response = await hcloud(`/servers/${num(server["id"])}/actions/change_type`, { method: "POST", body: { server_type: typeRef, upgrade_disk: !keepDisk } });
@@ -468,7 +468,7 @@ async function serverRebuild(args: string[]): Promise<string> {
     throw axiError(`${name} has rebuild protection`, "PROTECTED", [`Run \`hetzner-axi server protect ${name} --rebuild off\` first`]);
   }
   if (!bool(parsed, "--confirm")) {
-    return preview({ server: name, image: `${imageName(server)} -> ${imageRef}`, effect: "wipes the disk and installs the image; IPs are kept" }, `${command} ${name} --image ${shellQuote(imageRef)}`, [
+    return preview({ server: name, image: `${imageName(server)} -> ${imageRef}`, effect: "wipes the disk and installs the image; IPs are kept" }, rerunCommand(command, args), [
       `Run \`hetzner-axi server snapshot ${name}\` first to keep a copy`,
     ]);
   }
@@ -501,7 +501,7 @@ async function serverDelete(args: string[]): Promise<string> {
         effect: "deletes the server and its disk permanently",
         kept: `${volumes} attached volume${volumes === 1 ? "" : "s"} (detached, not deleted); primary IPs without auto-delete`,
       },
-      `${command} ${name}`,
+      rerunCommand(command, args),
       [`Run \`hetzner-axi server snapshot ${name}\` first to keep a copy`],
     );
   }

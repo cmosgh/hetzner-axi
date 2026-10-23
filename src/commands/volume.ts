@@ -169,7 +169,7 @@ async function volumeDetach(args: string[]): Promise<string> {
   const name = str(volume["name"]);
   if (!num(volume["server"])) return block({ volume: name, result: "already detached (no-op)" });
   if (!bool(parsed, "--confirm")) {
-    return preview({ volume: name, server: num(volume["server"]), effect: "detaches the block device; unmount it on the server first" }, `${command} ${shellQuote(name)}`);
+    return preview({ volume: name, server: num(volume["server"]), effect: "detaches the block device; unmount it on the server first" }, rerunCommand(command, args));
   }
   const response = await hcloud(`/volumes/${num(volume["id"])}/actions/detach`, { method: "POST" });
   const { result, text } = await settle(response["action"], waitSeconds(parsed));
@@ -188,7 +188,7 @@ async function volumeResize(args: string[]): Promise<string> {
   if (size === current) return block({ volume: name, size_gb: current, result: "already this size (no-op)" });
   if (size < current) throw usageError(`volumes only grow; ${name} is ${current} GB`);
   if (!bool(parsed, "--confirm")) {
-    return preview({ volume: name, size_gb: `${current} -> ${size}`, eur_month: `${(await volumePrice(current)) ?? "?"} -> ${(await volumePrice(size)) ?? "?"}`, effect: "cannot be shrunk again" }, `${command} ${shellQuote(name)} --size ${size}`);
+    return preview({ volume: name, size_gb: `${current} -> ${size}`, eur_month: `${(await volumePrice(current)) ?? "?"} -> ${(await volumePrice(size)) ?? "?"}`, effect: "cannot be shrunk again" }, rerunCommand(command, args));
   }
   const response = await hcloud(`/volumes/${num(volume["id"])}/actions/resize`, { method: "POST", body: { size } });
   const { result, text } = await settle(response["action"], waitSeconds(parsed));
@@ -203,7 +203,7 @@ async function volumeDelete(args: string[]): Promise<string> {
   const name = str(volume["name"]);
   if (num(volume["server"])) throw usageError(`${name} is still attached`, [`Run \`hetzner-axi volume detach ${shellQuote(name)} --confirm\` first`]);
   if (obj(volume["protection"])["delete"] === true) throw axiError(`${name} has delete protection`, "PROTECTED");
-  if (!bool(parsed, "--confirm")) return preview({ volume: name, size_gb: num(volume["size"]), labels: formatLabels(volume["labels"]), effect: "deletes the volume and its data permanently" }, `${command} ${shellQuote(name)}`);
+  if (!bool(parsed, "--confirm")) return preview({ volume: name, size_gb: num(volume["size"]), labels: formatLabels(volume["labels"]), effect: "deletes the volume and its data permanently" }, rerunCommand(command, args));
   await hcloud(`/volumes/${num(volume["id"])}`, { method: "DELETE" });
   return block({ volume: name, result: "deleted" });
 }

@@ -190,7 +190,7 @@ async function zoneDelete(args: string[]): Promise<string> {
   const zone = await findZone(ref!);
   const name = str(zone["name"]);
   if (obj(zone["protection"])["delete"] === true) throw axiError(`${name} has delete protection`, "PROTECTED");
-  if (!bool(parsed, "--confirm")) return preview({ zone: name, records: num(zone["record_count"]), effect: "deletes the zone and every record; the domain stops resolving if delegated here" }, `${command} ${name}`);
+  if (!bool(parsed, "--confirm")) return preview({ zone: name, records: num(zone["record_count"]), effect: "deletes the zone and every record; the domain stops resolving if delegated here" }, rerunCommand(command, args));
   const response = await hcloud(`/zones/${num(zone["id"])}`, { method: "DELETE" });
   await settle(response["action"], 60);
   return block({ zone: name, result: "deleted" });

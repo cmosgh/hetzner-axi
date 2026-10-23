@@ -1,7 +1,7 @@
 import { bool, expectPositionals, flag, parseArgs, parseFields, requireFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { block, extraFields, helpBlock, num, obj, out, str, type Fields, type Obj } from "../render.js";
+import { block, extraFields, helpBlock, num, obj, out, rerunCommand, str, type Fields, type Obj } from "../render.js";
 import { CONFIRM_FLAG, findOne, preview, runningHelp, settle, WAIT_FLAGS, waitSeconds } from "../resources.js";
 
 /** `ip list` extras; the default row is ip, kind, server, location. */
@@ -91,7 +91,7 @@ async function ipAssign(args: string[]): Promise<string> {
     if (str(server["status"]) !== "off") throw usageError(`primary IPs only move to a stopped server; ${name} is ${str(server["status"])}`, [`Run \`hetzner-axi server shutdown ${name} --confirm\``]);
   }
   if (!bool(parsed, "--confirm")) {
-    return preview({ ip, kind: address.kind, from: current ? `server ${current}` : "unassigned", to: name, effect: "traffic for this IP goes to the new server" }, `${command} ${ip} --server ${name}`, [
+    return preview({ ip, kind: address.kind, from: current ? `server ${current}` : "unassigned", to: name, effect: "traffic for this IP goes to the new server" }, rerunCommand(command, args), [
       ...(address.kind === "floating" ? ["Configure the floating IP on the server's network interface as well"] : []),
     ]);
   }
@@ -116,7 +116,7 @@ async function ipUnassign(args: string[]): Promise<string> {
     const server = obj((await hcloud(`/servers/${current}`))["server"]);
     if (str(server["status"]) !== "off") throw usageError(`primary IPs only detach from a stopped server; ${str(server["name"])} is ${str(server["status"])}`);
   }
-  if (!bool(parsed, "--confirm")) return preview({ ip, kind: address.kind, server: current, effect: "the server stops answering on this IP" }, `${command} ${ip}`);
+  if (!bool(parsed, "--confirm")) return preview({ ip, kind: address.kind, server: current, effect: "the server stops answering on this IP" }, rerunCommand(command, args));
   const id = num(address.raw["id"]);
   const response = await hcloud(`/${address.kind === "floating" ? "floating_ips" : "primary_ips"}/${id}/actions/unassign`, { method: "POST" });
   const { result, text } = await settle(response["action"], waitSeconds(parsed));

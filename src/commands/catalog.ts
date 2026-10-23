@@ -1,7 +1,7 @@
 import { bool, enumFlag, expectPositionals, flag, intFlag, parseArgs, parseFields, readFileFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { AxiError, usageError } from "../errors.js";
-import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, shellQuote, str, type Fields } from "../render.js";
+import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, rerunCommand, shellQuote, str, type Fields } from "../render.js";
 import { CONFIRM_FLAG, findOne, formatLabels, parseLabels, preview } from "../resources.js";
 
 /** Snapshot and backup `image list` extras; the default row is id, description, from, created. */
@@ -72,7 +72,7 @@ async function imageDelete(args: string[]): Promise<string> {
   const type = str(image["type"]);
   if (type !== "snapshot" && type !== "backup") throw usageError(`image ${id} is a ${type} image; only snapshots and backups can be deleted`);
   if (!bool(parsed, "--confirm")) {
-    return preview({ image: num(image["id"]), type, description: str(image["description"]), effect: "deletes the image permanently" }, `${command} ${id}`);
+    return preview({ image: num(image["id"]), type, description: str(image["description"]), effect: "deletes the image permanently" }, rerunCommand(command, args));
   }
   await hcloud(`/images/${id}`, { method: "DELETE" });
   return block({ image: num(image["id"]), result: "deleted" });
@@ -124,7 +124,7 @@ export async function sshKeyCommand(args: string[]): Promise<string> {
     const parsed = parseArgs(rest, [CONFIRM_FLAG], command);
     const [ref] = expectPositionals(parsed, 1, `${command} <name|id> --confirm`);
     const key = await findOne("ssh_keys", "ssh_key", ref!, "ssh key");
-    if (!bool(parsed, "--confirm")) return preview({ ssh_key: str(key["name"]), fingerprint: str(key["fingerprint"]), effect: "removes the key from the project; existing servers keep it" }, `${command} ${shellQuote(str(key["name"]))}`);
+    if (!bool(parsed, "--confirm")) return preview({ ssh_key: str(key["name"]), fingerprint: str(key["fingerprint"]), effect: "removes the key from the project; existing servers keep it" }, rerunCommand(command, rest));
     await hcloud(`/ssh_keys/${num(key["id"])}`, { method: "DELETE" });
     return block({ ssh_key: str(key["name"]), result: "deleted" });
   }
