@@ -91,6 +91,14 @@ export function duration(seconds: unknown): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** The extra values a list offers behind `--fields`, by field name. */
+export type Fields = Record<string, (item: Obj) => unknown>;
+
+/** The requested `--fields` extras for one row, in the order they were asked for. */
+export function extraFields(item: Obj, requested: readonly string[], fields: Fields): Obj {
+  return Object.fromEntries(requested.map((name) => [name, fields[name]?.(item)]));
+}
+
 /** "N of T total" when the backend knows the total, otherwise an honest bound. */
 export function countLine(shown: number, total: number | undefined, more: boolean): string {
   if (total !== undefined && total >= shown) {

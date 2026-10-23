@@ -26,15 +26,17 @@ describe("home", () => {
     mockApi([{ path: "/servers", json: page("servers", [server("web-1"), server("db-1", { id: 43, status: "off" })]) }]);
     const { stdout } = await run();
     expect(stdout).toContain("server_count: 2 (1 running; 1 off)");
+    expect(stdout).toContain("servers[2]{name,status,type,ipv4}:");
     expect(stdout.indexOf("db-1")).toBeLessThan(stdout.indexOf("web-1"));
   });
 });
 
 describe("server list and view", () => {
-  it("lists five default fields and extras by --fields", async () => {
+  it("lists four default fields and extras by --fields", async () => {
     const { calls } = mockApi([{ path: "/servers", json: page("servers", [server("web-1", { labels: { env: "prod" } })]) }]);
-    const { stdout } = await run("server", "list", "--label", "env=prod", "--fields", "eur_month,labels");
-    expect(calls[0]!.url.searchParams.get("label_selector")).toBe("env=prod");
+    expect((await run("server", "list")).stdout).toContain("servers[1]{name,status,type,ipv4}:\n  web-1,running,cx22,203.0.113.10\n");
+    const { stdout } = await run("server", "list", "--label", "env=prod", "--fields", "location,eur_month,labels");
+    expect(calls[1]!.url.searchParams.get("label_selector")).toBe("env=prod");
     expect(stdout).toContain("servers[1]{name,status,type,ipv4,location,eur_month,labels}:");
     expect(stdout).toContain("web-1,running,cx22,203.0.113.10,fsn1,4.51,env=prod");
   });
@@ -197,8 +199,79 @@ describe("server types", () => {
   it("filters by location, sorts by price and hides deprecated", async () => {
     mockApi([{ path: "/server_types", json: page("server_types", [CX32, CX22, { ...CX22, name: "cx11", deprecated: true }]) }]);
     const { stdout } = await run("server", "types", "--location", "fsn1");
-    expect(stdout).toMatch(/cx22,2,4,40,shared,x86,4.51\n\s+cx32/);
+    expect(stdout).toContain("server_types[2]{name,cores,memory,eur_month}:");
+    expect(stdout).toMatch(/cx22,2,4,4.51\n\s+cx32/);
     expect(stdout).not.toContain("cx11");
+  });
+
+  it("adds disk, cpu and arch by --fields", async () => {
+    mockApi([{ path: "/server_types", json: page("server_types", [CX22]) }]);
+    const { stdout } = await run("server", "types", "--fields", "disk,cpu,arch");
+    expect(stdout).toContain("server_types[1]{name,cores,memory,eur_month,disk,cpu,arch}:\n  cx22,2,4,4.51,40,shared,x86\n");
+  });
+});
+
+describe("list --fields", () => {
+  it.each([
+    ["server", "list"],
+    ["server", "types"],
+    ["volume", "list"],
+    ["ip", "list"],
+    ["lb", "list"],
+    ["action", "list"],
+    ["image", "list"],
+  ])("%s %s rejects an unknown field before any request and its help lists the valid ones", async (command, sub) => {
+    const { calls } = mockApi([]);
+    const { stdout, exitCode } = await run(command, sub, "--fields", "bogus");
+    expect(exitCode).toBe(2);
+    expect(calls).toHaveLength(0);
+    const valid = /available --fields: (.+)/.exec(stdout)![1]!.split(", ");
+    expect((await run(command, "--help")).stdout).toContain(`--fields <${valid.join(",")}>`);
+  });
+
+  it("volume list shows four fields, device and id on request", async () => {
+    const volume = { id: 6, name: "data", size: 50, server: 42, location: { name: "fsn1" }, linux_device: "/dev/disk/by-id/scsi-0HC_Volume_6" };
+    mockApi([
+      { path: "/volumes", json: page("volumes", [volume]) },
+      { path: "/servers", json: page("servers", [server("web-1")]) },
+    ]);
+    expect((await run("volume", "list")).stdout).toContain("volumes[1]{name,size_gb,server,location}:\n  data,50,web-1,fsn1\n");
+    expect((await run("volume", "list", "--fields", "device,id")).stdout).toContain("data,50,web-1,fsn1,/dev/disk/by-id/scsi-0HC_Volume_6,6");
+  });
+
+  it("ip list shows four fields, name and id on request", async () => {
+    mockApi([
+      { path: "/floating_ips", json: page("floating_ips", [{ id: 8, ip: "198.51.100.5", name: "vip", server: 42, home_location: { name: "fsn1" } }]) },
+      { path: "/primary_ips", json: page("primary_ips", []) },
+      { path: "/servers", json: page("servers", [server("web-1")]) },
+    ]);
+    expect((await run("ip", "list")).stdout).toContain("ips[1]{ip,kind,server,location}:\n  198.51.100.5,floating,web-1,fsn1\n");
+    expect((await run("ip", "list", "--fields", "name,id")).stdout).toContain("198.51.100.5,floating,web-1,fsn1,vip,8");
+  });
+
+  it("lb list shows four fields, location and id on request", async () => {
+    const lb = { id: 4, name: "web-lb", load_balancer_type: { name: "lb11" }, public_net: { ipv4: { ip: "203.0.113.20" } }, location: { name: "nbg1" }, targets: [] };
+    mockApi([{ path: "/load_balancers", json: page("load_balancers", [lb]) }]);
+    expect((await run("lb", "list")).stdout).toContain("load_balancers[1]{name,type,ipv4,targets}:\n  web-lb,lb11,203.0.113.20,0 targets\n");
+    expect((await run("lb", "list", "--fields", "location,id")).stdout).toContain("web-lb,lb11,203.0.113.20,0 targets,nbg1,4");
+  });
+
+  it("action list shows four fields, started on request", async () => {
+    const action = { id: 2, command: "start_server", status: "success", started: new Date().toISOString(), resources: [{ id: 42, type: "server" }] };
+    mockApi([{ path: "/servers/actions", json: page("actions", [action]) }]);
+    expect((await run("action", "list")).stdout).toContain("actions[1]{id,command,status,resource}:\n  2,start_server,success,server 42\n");
+    expect((await run("action", "list", "--fields", "started")).stdout).toContain("2,start_server,success,server 42,just now");
+  });
+
+  it("snapshot lists show four fields and size_gb on request; system lists take no --fields", async () => {
+    const snapshot = { id: 70, type: "snapshot", description: "web-1 nightly", image_size: 1.234, created_from: { id: 42, name: "web-1" }, created: new Date().toISOString() };
+    const { calls } = mockApi([{ path: "/images", json: page("images", [snapshot]) }]);
+    expect((await run("image", "list", "--type", "snapshot")).stdout).toContain("images[1]{id,description,from,created}:\n  70,web-1 nightly,web-1,just now\n");
+    expect((await run("image", "list", "--type", "snapshot", "--fields", "size_gb")).stdout).toContain("70,web-1 nightly,web-1,just now,1.23");
+    const system = await run("image", "list", "--fields", "size_gb");
+    expect(system.exitCode).toBe(2);
+    expect(system.stdout).toContain("only snapshot and backup lists take --fields");
+    expect(calls).toHaveLength(2);
   });
 });
 

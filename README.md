@@ -8,10 +8,10 @@ It talks to the Hetzner Cloud API directly - no `hcloud` binary needed. Everythi
 $ hetzner-axi
 context: prod
 server_count: 3 (2 running; 1 off)
-servers[3]{name,status,type,ipv4,location}:
-  build-1,off,cx32,203.0.113.12,fsn1
-  db-1,running,ccx13,203.0.113.11,fsn1
-  web-1,running,cx22,203.0.113.10,fsn1
+servers[3]{name,status,type,ipv4}:
+  build-1,off,cx32,203.0.113.12
+  db-1,running,ccx13,203.0.113.11
+  web-1,running,cx22,203.0.113.10
 help[2]:
   Run `hetzner-axi server view <name>` for details
   Run `hetzner-axi --help` for every command
@@ -67,8 +67,8 @@ hetzner-axi auth use staging
 | Command | What it does |
 | --- | --- |
 | `hetzner-axi` | Active project: server count by status, not-running servers first |
-| `server list` / `view <server>` | `--status`, `--label env=prod`, `--fields eur_month,labels,...`; view shows spec, price, IPs, firewalls, volumes, protection |
-| `server types` | Specs and gross EUR/month, `--location fsn1`, `--arch arm`, `--cpu dedicated` |
+| `server list` / `view <server>` | `--status`, `--label env=prod`, `--fields location,eur_month,labels,...`; view shows spec, price, IPs, firewalls, volumes, protection |
+| `server types` | Specs and gross EUR/month, `--location fsn1`, `--arch arm`, `--cpu dedicated`, `--fields disk,cpu,arch` |
 | `server create` | `--name --type --image --location --ssh-key --firewall --network --label --user-data-file`; previews the price; no-op if the name exists |
 | `server poweron` / `shutdown` / `reboot` / `poweroff` / `reset` | Status-aware no-ops; disruptive ones preview |
 | `server resize` / `rebuild` / `delete` | Checks status and protection before previewing |
@@ -82,7 +82,7 @@ hetzner-axi auth use staging
 | `image list` / `delete`, `location list`, `network list`, `lb list` / `view`, `action list` / `view` | Catalog and read-only views |
 | `api [METHOD] /path` | Escape hatch; `DELETE` needs `--confirm` |
 
-Every command has `--help`.
+Every command has `--help`. Lists show at most four fields per row; `--fields` adds the extras each list's `--help` names.
 
 ## Development
 

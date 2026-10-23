@@ -1,12 +1,20 @@
-import { bool, enumFlag, expectPositionals, flag, flags, parseArgs, requireFlag } from "../args.js";
+import { bool, enumFlag, expectPositionals, flag, flags, parseArgs, parseFields, requireFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { arr, block, helpBlock, num, obj, out, str, type Obj } from "../render.js";
+import { arr, block, extraFields, helpBlock, num, obj, out, str, type Fields, type Obj } from "../render.js";
 import { CONFIRM_FLAG, findOne, formatLabels, parseLabels, preview, runningHelp, settle, WAIT_FLAGS, waitSeconds } from "../resources.js";
+
+/** `volume list` extras; the default row is name, size_gb, server, location. */
+const LIST_FIELDS: Fields = {
+  device: (v) => str(v["linux_device"]),
+  id: (v) => num(v["id"]),
+};
 
 export const VOLUME_HELP = `usage: hetzner-axi volume <subcommand> [args] [flags]
 subcommands[6]:
   list, create, attach <volume>, detach <volume>, resize <volume>, delete <volume>
+flags{list}:
+  --fields <${Object.keys(LIST_FIELDS).join(",")}>
 flags{create}:
   --name, --size <GB 10-10240> (required), --location <name> | --server <name|id> (attach right away), --format <ext4|xfs>, --automount, --label <k=v> (repeatable), --confirm
 flags{attach}:
@@ -57,7 +65,9 @@ async function volumePrice(size: number): Promise<number | undefined> {
 
 async function volumeList(args: string[]): Promise<string> {
   const command = "hetzner-axi volume list";
-  expectPositionals(parseArgs(args, [], command), 0, command);
+  const parsed = parseArgs(args, [{ name: "--fields" }], command);
+  expectPositionals(parsed, 0, command);
+  const extras = parseFields(flag(parsed, "--fields"), Object.keys(LIST_FIELDS));
   const { items } = await listAll("/volumes", "volumes", { sort: "name:asc" });
   if (items.length === 0) return out(block({ volumes: "0 volumes in this project" }), helpBlock(["Run `hetzner-axi volume create --help`"]));
   const names = items.some((v) => num(v["server"])) ? await serverNames() : new Map<number, string>();
@@ -67,7 +77,7 @@ async function volumeList(args: string[]): Promise<string> {
       size_gb: num(v["size"]),
       server: num(v["server"]) ? (names.get(num(v["server"])!) ?? `id ${num(v["server"])}`) : "detached",
       location: str(obj(v["location"])["name"]),
-      device: str(v["linux_device"]),
+      ...extraFields(v, extras, LIST_FIELDS),
     })),
   });
 }

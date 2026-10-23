@@ -1,11 +1,19 @@
-import { bool, expectPositionals, parseArgs, requireFlag } from "../args.js";
+import { bool, expectPositionals, flag, parseArgs, parseFields, requireFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { block, helpBlock, num, obj, out, str, type Obj } from "../render.js";
+import { block, extraFields, helpBlock, num, obj, out, str, type Fields, type Obj } from "../render.js";
 import { CONFIRM_FLAG, findOne, preview, runningHelp, settle, WAIT_FLAGS, waitSeconds } from "../resources.js";
+
+/** `ip list` extras; the default row is ip, kind, server, location. */
+const LIST_FIELDS: Fields = {
+  name: (ip) => str(ip["name"]),
+  id: (ip) => num(ip["id"]),
+};
 
 export const IP_HELP = `usage: hetzner-axi ip <list|assign|unassign> [args] [flags]
 Floating IPs and primary IPs. <ip> is the address, the name, or the numeric id.
+flags{list}:
+  --fields <${Object.keys(LIST_FIELDS).join(",")}>
 flags{assign}:
   --server <name|id> (required), --confirm, --no-wait, --wait <seconds>
 flags{unassign}:
@@ -50,7 +58,9 @@ export async function ipCommand(args: string[]): Promise<string> {
 
 async function ipList(args: string[]): Promise<string> {
   const command = "hetzner-axi ip list";
-  expectPositionals(parseArgs(args, [], command), 0, command);
+  const parsed = parseArgs(args, [{ name: "--fields" }], command);
+  expectPositionals(parsed, 0, command);
+  const extras = parseFields(flag(parsed, "--fields"), Object.keys(LIST_FIELDS));
   const [addresses, servers] = await Promise.all([allAddresses(), listAll("/servers", "servers", {}, 1000)]);
   if (addresses.length === 0) return block({ ips: "0 floating or primary IPs in this project" });
   const names = new Map(servers.items.map((s) => [num(s["id"]) ?? 0, str(s["name"])]));
@@ -58,9 +68,9 @@ async function ipList(args: string[]): Promise<string> {
     ips: addresses.map((a) => ({
       ip: str(a.raw["ip"]),
       kind: a.kind,
-      name: str(a.raw["name"]),
       server: assignee(a) ? (names.get(assignee(a)!) ?? `id ${assignee(a)}`) : "unassigned",
       location: str(obj(a.kind === "floating" ? a.raw["home_location"] : a.raw["location"])["name"]),
+      ...extraFields(a.raw, extras, LIST_FIELDS),
     })),
   });
 }

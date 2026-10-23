@@ -1,12 +1,17 @@
-import { bool, enumFlag, expectPositionals, flag, intFlag, parseArgs, readFileFlag } from "../args.js";
+import { bool, enumFlag, expectPositionals, flag, intFlag, parseArgs, parseFields, readFileFlag } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { AxiError, usageError } from "../errors.js";
-import { arr, block, countLine, helpBlock, num, obj, out, relTime, str } from "../render.js";
+import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, str, type Fields } from "../render.js";
 import { CONFIRM_FLAG, findOne, formatLabels, parseLabels, preview } from "../resources.js";
+
+/** Snapshot and backup `image list` extras; the default row is id, description, from, created. */
+const IMAGE_FIELDS: Fields = {
+  size_gb: (i) => Math.round((num(i["image_size"]) ?? 0) * 100) / 100,
+};
 
 export const IMAGE_HELP = `usage: hetzner-axi image <list|delete> [flags]
 flags{list}:
-  --type <system|snapshot|backup|app> (default system), --arch <x86|arm>, --label <selector>, --all (include deprecated), --limit <1-1000> (default 100)
+  --type <system|snapshot|backup|app> (default system), --arch <x86|arm>, --label <selector>, --all (include deprecated), --limit <1-1000> (default 100), --fields <${Object.keys(IMAGE_FIELDS).join(",")}> (snapshot and backup)
 flags{delete}:
   <id> --confirm (snapshots and backups only)
 examples[3]:
@@ -28,11 +33,14 @@ export async function imageCommand(args: string[]): Promise<string> {
 
 async function imageList(args: string[]): Promise<string> {
   const command = "hetzner-axi image list";
-  const parsed = parseArgs(args, [{ name: "--type" }, { name: "--arch" }, { name: "--label" }, { name: "--all", boolean: true }, { name: "--limit" }], command);
+  const parsed = parseArgs(args, [{ name: "--type" }, { name: "--arch" }, { name: "--label" }, { name: "--all", boolean: true }, { name: "--limit" }, { name: "--fields" }], command);
   expectPositionals(parsed, 0, command);
   const type = enumFlag(parsed, "--type", ["system", "snapshot", "backup", "app"] as const, "system");
   const arch = flag(parsed, "--arch") === undefined ? undefined : enumFlag(parsed, "--arch", ["x86", "arm"] as const, "x86");
   const limit = intFlag(parsed, "--limit", 100, { min: 1, max: 1000 });
+  const custom = type === "snapshot" || type === "backup";
+  const extras = parseFields(flag(parsed, "--fields"), Object.keys(IMAGE_FIELDS));
+  if (extras.length > 0 && !custom) throw usageError("only snapshot and backup lists take --fields", [`Run \`${command} --type <snapshot|backup> --fields ${extras.join(",")}\``]);
   const page = await listAll(
     "/images",
     "images",
@@ -40,10 +48,9 @@ async function imageList(args: string[]): Promise<string> {
     limit,
   );
   if (page.items.length === 0) return block({ images: `0 ${type} images` });
-  const custom = type === "snapshot" || type === "backup";
   const rows = page.items.map((i) =>
     custom
-      ? { id: num(i["id"]), description: str(i["description"]), size_gb: Math.round((num(i["image_size"]) ?? 0) * 100) / 100, from: str(obj(i["created_from"])["name"]) || "unknown", created: relTime(i["created"]) }
+      ? { id: num(i["id"]), description: str(i["description"]), from: str(obj(i["created_from"])["name"]) || "unknown", created: relTime(i["created"]), ...extraFields(i, extras, IMAGE_FIELDS) }
       : { name: str(i["name"]), arch: str(i["architecture"]), os: `${str(i["os_flavor"])} ${str(i["os_version"])}`.trim(), ...(i["deprecated"] ? { deprecated: "yes" } : {}) },
   );
   return out(
@@ -166,15 +173,25 @@ export async function networkCommand(args: string[]): Promise<string> {
   });
 }
 
+/** `lb list` extras; the default row is name, type, ipv4, targets. */
+const LB_FIELDS: Fields = {
+  location: (lb) => str(obj(lb["location"])["name"]),
+  id: (lb) => num(lb["id"]),
+};
+
 export const LB_HELP = `usage: hetzner-axi lb <list|view> [<name|id>]
 Load balancers with their services and target health (read-only).
+flags{list}:
+  --fields <${Object.keys(LB_FIELDS).join(",")}>
 `;
 
 export async function lbCommand(args: string[]): Promise<string> {
   const [sub, ...rest] = args;
   if (sub === "list") {
     const command = "hetzner-axi lb list";
-    expectPositionals(parseArgs(rest, [], command), 0, command);
+    const parsed = parseArgs(rest, [{ name: "--fields" }], command);
+    expectPositionals(parsed, 0, command);
+    const extras = parseFields(flag(parsed, "--fields"), Object.keys(LB_FIELDS));
     const { items } = await listAll("/load_balancers", "load_balancers", { sort: "name:asc" });
     if (items.length === 0) return block({ load_balancers: "0 load balancers in this project" });
     return out(
@@ -183,8 +200,8 @@ export async function lbCommand(args: string[]): Promise<string> {
           name: str(lb["name"]),
           type: str(obj(lb["load_balancer_type"])["name"]),
           ipv4: str(obj(obj(lb["public_net"])["ipv4"])["ip"]) || "none",
-          location: str(obj(lb["location"])["name"]),
           targets: targetHealth(lb),
+          ...extraFields(lb, extras, LB_FIELDS),
         })),
       }),
       helpBlock(["Run `hetzner-axi lb view <name>` for services and per-target health"]),
@@ -223,10 +240,15 @@ function targetHealth(lb: Record<string, unknown>): string {
 
 const ACTION_COLLECTIONS = ["servers", "volumes", "floating_ips", "primary_ips", "firewalls", "networks", "load_balancers", "images", "zones"];
 
+/** `action list` extras; the default row is id, command, status, resource (newest first). */
+const ACTION_FIELDS: Fields = {
+  started: (a) => relTime(a["started"]),
+};
+
 export const ACTION_HELP = `usage: hetzner-axi action <list|view> [<id>] [flags]
 Hetzner runs changes as asynchronous actions; mutations wait for them, --no-wait returns early.
 flags{list}:
-  --running (only running), --limit <1-100> (default 20)
+  --running (only running), --limit <1-100> (default 20), --fields <${Object.keys(ACTION_FIELDS).join(",")}>
 examples[2]:
   hetzner-axi action list --running
   hetzner-axi action view 4711
@@ -236,9 +258,10 @@ export async function actionCommand(args: string[]): Promise<string> {
   const [sub, ...rest] = args;
   if (sub === "list") {
     const command = "hetzner-axi action list";
-    const parsed = parseArgs(rest, [{ name: "--running", boolean: true }, { name: "--limit" }], command);
+    const parsed = parseArgs(rest, [{ name: "--running", boolean: true }, { name: "--limit" }, { name: "--fields" }], command);
     expectPositionals(parsed, 0, command);
     const limit = intFlag(parsed, "--limit", 20, { min: 1, max: 100 });
+    const extras = parseFields(flag(parsed, "--fields"), Object.keys(ACTION_FIELDS));
     const status = bool(parsed, "--running") ? "running" : undefined;
     const lists = await Promise.all(
       ACTION_COLLECTIONS.map((collection) =>
@@ -263,7 +286,7 @@ export async function actionCommand(args: string[]): Promise<string> {
         command: str(a["command"]),
         status: str(a["status"]),
         resource: arr(a["resources"]).map((r) => `${str(obj(r)["type"])} ${num(obj(r)["id"])}`).join("; "),
-        started: relTime(a["started"]),
+        ...extraFields(a, extras, ACTION_FIELDS),
       })),
     });
   }

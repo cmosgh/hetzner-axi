@@ -1,7 +1,7 @@
 import { bool, enumFlag, expectPositionals, flag, flags, intFlag, parseArgs, parseFields, readFileFlag, requireFlag, type ParsedArgs } from "../args.js";
 import { hcloud, listAll } from "../client.js";
 import { axiError, usageError } from "../errors.js";
-import { arr, block, countLine, helpBlock, num, obj, out, relTime, str, type Obj } from "../render.js";
+import { arr, block, countLine, extraFields, helpBlock, num, obj, out, relTime, str, type Fields, type Obj } from "../render.js";
 import {
   CONFIRM_FLAG,
   findOne,
@@ -17,14 +17,37 @@ import {
   waitSeconds,
 } from "../resources.js";
 
+/** `server list` extras; the default row is name, status, type, ipv4. */
+const LIST_FIELDS: Fields = {
+  location: locationName,
+  id: (s) => num(s["id"]),
+  ipv6,
+  image: imageName,
+  created: (s) => relTime(s["created"]),
+  labels: (s) => formatLabels(s["labels"]),
+  private_ip: (s) => arr(s["private_net"]).map((n) => str(obj(n)["ip"])).filter(Boolean).join("; ") || "none",
+  cores: (s) => num(obj(s["server_type"])["cores"]),
+  memory: (s) => num(obj(s["server_type"])["memory"]),
+  disk: (s) => num(obj(s["server_type"])["disk"]),
+  eur_month: (s) => monthlyPrice(obj(s["server_type"])["prices"], locationName(s)) ?? "unknown",
+  protection: (s) => `delete ${onOff(obj(s["protection"])["delete"])}; rebuild ${onOff(obj(s["protection"])["rebuild"])}`,
+};
+
+/** `server types` extras; the default row is name, cores, memory, eur_month. */
+const TYPE_FIELDS: Fields = {
+  disk: (t) => num(t["disk"]),
+  cpu: (t) => str(t["cpu_type"]),
+  arch: (t) => str(t["architecture"]),
+};
+
 export const SERVER_HELP = `usage: hetzner-axi server <subcommand> [args] [flags]
 subcommands[15]:
   list, view <server>, types, create, poweron <server>, shutdown <server>, reboot <server>, poweroff <server>, reset <server>, resize <server>, rebuild <server>, delete <server>, label <server>, protect <server>, snapshot <server>
   <server> is a name or numeric id
 flags{list}:
-  --status <running|off|...>, --label <selector> (e.g. env=prod), --name <exact>, --limit <1-1000> (default 50), --fields <id,ipv6,image,created,labels,private_ip,cores,memory,disk,eur_month,protection>
+  --status <running|off|...>, --label <selector> (e.g. env=prod), --name <exact>, --limit <1-1000> (default 50), --fields <${Object.keys(LIST_FIELDS).join(",")}>
 flags{types}:
-  --location <name> (prices and availability there), --arch <x86|arm>, --cpu <shared|dedicated>, --all (include deprecated)
+  --location <name> (prices and availability there), --arch <x86|arm>, --cpu <shared|dedicated>, --all (include deprecated), --fields <${Object.keys(TYPE_FIELDS).join(",")}>
 flags{create}:
   --name, --type, --image (required), --location, --ssh-key <name|id> (repeatable), --firewall <name|id> (repeatable), --network <name|id> (repeatable), --label <k=v> (repeatable), --user-data-file <path>, --no-ipv4, --no-ipv6, --stopped, --confirm
 flags{shutdown,reboot,poweroff,reset,delete}:
@@ -52,7 +75,6 @@ examples[6]:
 `;
 
 const SUBCOMMANDS = ["list", "view", "types", "create", "poweron", "shutdown", "reboot", "poweroff", "reset", "resize", "rebuild", "delete", "label", "protect", "snapshot"] as const;
-const LIST_FIELDS = ["id", "ipv6", "image", "created", "labels", "private_ip", "cores", "memory", "disk", "eur_month", "protection"] as const;
 const STATUSES = ["running", "initializing", "starting", "stopping", "off", "deleting", "migrating", "rebuilding", "unknown"] as const;
 
 export async function serverCommand(args: string[]): Promise<string> {
@@ -117,22 +139,7 @@ function onOff(value: unknown): string {
 }
 
 export function serverRow(server: Obj, extras: readonly string[] = []): Obj {
-  const type = obj(server["server_type"]);
-  const row: Obj = { name: str(server["name"]), status: str(server["status"]), type: typeName(server), ipv4: ipv4(server), location: locationName(server) };
-  for (const field of extras) {
-    if (field === "id") row["id"] = num(server["id"]);
-    if (field === "ipv6") row["ipv6"] = ipv6(server);
-    if (field === "image") row["image"] = imageName(server);
-    if (field === "created") row["created"] = relTime(server["created"]);
-    if (field === "labels") row["labels"] = formatLabels(server["labels"]);
-    if (field === "private_ip") row["private_ip"] = arr(server["private_net"]).map((n) => str(obj(n)["ip"])).filter(Boolean).join("; ") || "none";
-    if (field === "cores") row["cores"] = num(type["cores"]);
-    if (field === "memory") row["memory"] = num(type["memory"]);
-    if (field === "disk") row["disk"] = num(type["disk"]);
-    if (field === "eur_month") row["eur_month"] = monthlyPrice(type["prices"], locationName(server)) ?? "unknown";
-    if (field === "protection") row["protection"] = `delete ${onOff(obj(server["protection"])["delete"])}; rebuild ${onOff(obj(server["protection"])["rebuild"])}`;
-  }
-  return row;
+  return { name: str(server["name"]), status: str(server["status"]), type: typeName(server), ipv4: ipv4(server), ...extraFields(server, extras, LIST_FIELDS) };
 }
 
 async function serverList(args: string[]): Promise<string> {
@@ -141,7 +148,7 @@ async function serverList(args: string[]): Promise<string> {
   expectPositionals(parsed, 0, command);
   const status = flag(parsed, "--status") === undefined ? undefined : enumFlag(parsed, "--status", STATUSES, "running");
   const limit = intFlag(parsed, "--limit", 50, { min: 1, max: 1000 });
-  const extras = parseFields(flag(parsed, "--fields"), LIST_FIELDS);
+  const extras = parseFields(flag(parsed, "--fields"), Object.keys(LIST_FIELDS));
   const page = await listAll("/servers", "servers", { status, label_selector: flag(parsed, "--label"), name: flag(parsed, "--name"), sort: "name:asc" }, limit);
   const filtered = Boolean(status ?? flag(parsed, "--label") ?? flag(parsed, "--name"));
   if (page.items.length === 0) {
@@ -202,11 +209,12 @@ async function serverView(args: string[]): Promise<string> {
 
 async function serverTypes(args: string[]): Promise<string> {
   const command = "hetzner-axi server types";
-  const parsed = parseArgs(args, [{ name: "--location" }, { name: "--arch" }, { name: "--cpu" }, { name: "--all", boolean: true }], command);
+  const parsed = parseArgs(args, [{ name: "--location" }, { name: "--arch" }, { name: "--cpu" }, { name: "--all", boolean: true }, { name: "--fields" }], command);
   expectPositionals(parsed, 0, command);
   const location = flag(parsed, "--location");
   const arch = flag(parsed, "--arch") === undefined ? undefined : enumFlag(parsed, "--arch", ["x86", "arm"] as const, "x86");
   const cpu = flag(parsed, "--cpu") === undefined ? undefined : enumFlag(parsed, "--cpu", ["shared", "dedicated"] as const, "shared");
+  const extras = parseFields(flag(parsed, "--fields"), Object.keys(TYPE_FIELDS));
   const types = (await listAll("/server_types", "server_types")).items;
   if (location && !types.some((t) => arr(t["prices"]).some((p) => str(obj(p)["location"]) === location))) {
     const known = [...new Set(types.flatMap((t) => arr(t["prices"]).map((p) => str(obj(p)["location"]))))].sort();
@@ -227,10 +235,8 @@ async function serverTypes(args: string[]): Promise<string> {
       name: str(t["name"]),
       cores: num(t["cores"]),
       memory: num(t["memory"]),
-      disk: num(t["disk"]),
-      cpu: str(t["cpu_type"]),
-      arch: str(t["architecture"]),
       eur_month: monthlyPrice(t["prices"], location) ?? "n/a",
+      ...extraFields(t, extras, TYPE_FIELDS),
     }))
     .sort((a, b) => (typeof a.eur_month === "number" ? a.eur_month : 1e9) - (typeof b.eur_month === "number" ? b.eur_month : 1e9));
   if (rows.length === 0) return block({ server_types: "0 server types match these filters" });
