@@ -287,6 +287,7 @@ describe("setup", () => {
     process.chdir(project);
     const { stdout, exitCode } = await run("setup", "hooks", "--local");
     expect(exitCode).toBe(2);
+    expect(stdout).toContain("runs from the pnpm dlx cache");
     expect(stdout).toContain("then `hetzner-axi setup hooks --local`");
     expect(existsSync(join(project, ".claude"))).toBe(false);
   });

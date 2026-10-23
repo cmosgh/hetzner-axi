@@ -212,8 +212,9 @@ export async function setupCommand(args: string[]): Promise<string> {
 
   const execPath = installedExecPath();
   if (!execPath) throw usageError(`run setup from an installed ${NAME} (npm install -g ${NAME}), not from a source checkout`);
-  if (TEMPORARY_INSTALL.test(real(execPath) ?? execPath)) {
-    throw usageError(`this ${NAME} runs from the npx cache, which later sessions do not have - a hook would break`, [
+  const temporary = TEMPORARY_INSTALL.exec(real(execPath) ?? execPath)?.[1];
+  if (temporary) {
+    throw usageError(`this ${NAME} runs from the ${temporary === "dlx" ? "pnpm dlx" : "npx"} cache, which later sessions do not have - a hook would break`, [
       `Run \`npm install -g ${NAME}\`, then \`${rerun}\``,
       `Or use the skill instead: ${SKILL_INSTALL}`,
     ]);
