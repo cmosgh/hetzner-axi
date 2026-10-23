@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { HookSettings } from "axi-sdk-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { commandName } from "../src/cli.js";
 import { configDir, writeConfig } from "../src/config.js";
+import { agentFiles, findHooks, installHooks, ourHook, removeHooks } from "../src/hooks.js";
 import { findInvocations, lastSession, recordSession, sessionText, shellSegments, summarizeTranscript } from "../src/sessionlog.js";
 import { mockApi, run, useTestEnv } from "./helpers.js";
 
@@ -109,6 +111,169 @@ describe("session capture", () => {
     expect(lastSession("/work/0")).toBeUndefined();
     expect(lastSession("/work/1")).toBeDefined();
     expect(lastSession("/work/100")).toBeDefined();
+  });
+});
+
+describe("hook entries", () => {
+  const start = (command: string, extra: object = {}) => ({ matcher: "", hooks: [{ type: "command", command, timeout: 10, ...extra }] });
+
+  it("knows its own hooks by binary name, not by substring", () => {
+    expect(ourHook("hetzner-axi context", "hetzner-axi")).toBe("start");
+    expect(ourHook("'/Users/a b/bin/hetzner-axi' context end", "hetzner-axi")).toBe("end");
+    expect(ourHook("/usr/local/lib/node_modules/hetzner-axi/dist/bin/hetzner-axi.js", "hetzner-axi")).toBe("start");
+    expect(ourHook("hetzner-axi", "hetzner-axi")).toBe("start");
+    expect(ourHook("mongo-axi context", "hetzner-axi")).toBeUndefined();
+    expect(ourHook("/src/hetzner-axi/run.sh", "hetzner-axi")).toBeUndefined();
+    expect(ourHook("hetzner-axi server list", "hetzner-axi")).toBeUndefined();
+    expect(ourHook("hetzner-axi context && echo hi", "hetzner-axi")).toBeUndefined();
+  });
+
+  it("adds start and end hooks, repairs the binary in place and is a no-op when current", () => {
+    const settings = { model: "x", hooks: { SessionStart: [start("other-tool")] } } as HookSettings;
+    const [first, added] = installHooks(settings, "hetzner-axi", "/old/hetzner-axi", ["start", "end"]);
+    expect(added).toBe(true);
+    expect(findHooks(first, "hetzner-axi")).toEqual({ start: "/old/hetzner-axi context", end: "/old/hetzner-axi context end" });
+    const [moved, repaired] = installHooks(first, "hetzner-axi", "hetzner-axi", ["start", "end"]);
+    expect(repaired).toBe(true);
+    expect(moved.hooks!.SessionStart).toHaveLength(2);
+    expect(findHooks(moved, "hetzner-axi")).toEqual({ start: "hetzner-axi context", end: "hetzner-axi context end" });
+    expect(installHooks(moved, "hetzner-axi", "hetzner-axi", ["start", "end"])).toEqual([moved, false]);
+    expect(JSON.stringify(moved)).toContain("other-tool");
+  });
+
+  it("upgrades what the axi-sdk-js installer wrote, drops duplicates and leaves hand-written hooks", () => {
+    const handWritten = { hooks: [{ type: "command", command: "hetzner-axi server list" }] };
+    const old = {
+      hooks: {
+        SessionStart: [start("/usr/local/lib/node_modules/hetzner-axi/dist/bin/hetzner-axi.js"), start("hetzner-axi"), handWritten],
+        session_start: [{ type: "command", command: "hetzner-axi" }],
+      },
+    } as HookSettings;
+    const [next] = installHooks(old, "hetzner-axi", "hetzner-axi", ["start"]);
+    expect(next.hooks).toEqual({ SessionStart: [start("hetzner-axi context"), handWritten] });
+  });
+
+  it("removes only its own hooks and empty containers it emptied", () => {
+    const settings = { hooks: { SessionStart: [start("hetzner-axi context"), start("other-tool")], SessionEnd: [start("hetzner-axi context end")] } } as HookSettings;
+    const [removed, changed] = removeHooks(settings, "hetzner-axi");
+    expect(changed).toBe(true);
+    expect(removed).toEqual({ hooks: { SessionStart: [start("other-tool")] } });
+    expect(removeHooks({ hooks: { SessionStart: [] } }, "hetzner-axi")[1]).toBe(false);
+    expect(removeHooks({ hooks: { SessionStart: [start("hetzner-axi context")] } }, "hetzner-axi")[0]).toEqual({});
+  });
+});
+
+describe("setup", () => {
+  let bin = "";
+  const install = (at: string): string => {
+    const path = join(home, at, "node_modules", "hetzner-axi", "dist", "bin", "hetzner-axi.js");
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, "");
+    process.argv[1] = path;
+    return path;
+  };
+  const readJson = (path: string) => JSON.parse(readFileSync(path, "utf-8")) as HookSettings;
+  const claude = () => readJson(join(home, ".claude", "settings.json"));
+  const plugin = () => join(home, ".config", "opencode", "plugins", "axi-hetzner-axi.js");
+
+  beforeEach(() => {
+    // The file-level beforeEach moved HOME; every agent file must resolve inside it.
+    for (const path of Object.values(agentFiles("hetzner-axi", "user", process.cwd()))) expect(path.startsWith(`${home}/`)).toBe(true);
+    bin = install("lib");
+  });
+
+  it("installs Claude Code start and end, Codex start with its feature flag and the OpenCode plugin; a rerun is a no-op", async () => {
+    const first = await run("setup", "hooks");
+    expect(first.exitCode).toBe(0);
+    expect(first.stdout).toContain("claude_code: installed (session start + end)");
+    expect(first.stdout).toContain("codex: installed (session start)");
+    expect(first.stdout).toContain("opencode: installed (session start)");
+    expect(findHooks(claude(), "hetzner-axi")).toEqual({ start: `${bin} context`, end: `${bin} context end` });
+    expect(claude().hooks!["SessionEnd"]).toEqual([{ matcher: "", hooks: [{ type: "command", command: `${bin} context end`, timeout: 30 }] }]);
+    expect(findHooks(readJson(join(home, ".codex", "hooks.json")), "hetzner-axi")).toEqual({ start: `${bin} context` });
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf-8")).toBe("[features]\nhooks = true\n");
+    expect(readFileSync(plugin(), "utf-8")).toContain('const args = ["context"];');
+
+    const again = await run("setup", "hooks");
+    expect(again.stdout.match(/already up to date \(no-op\)/g)).toHaveLength(3);
+    const status = await run("setup", "status");
+    expect(status.stdout).toMatch(/claude_code: session start \+ end\n {2}codex: session start\n {2}opencode: session start/);
+
+    const removed = await run("setup", "uninstall");
+    expect(removed.stdout.match(/: removed/g)).toHaveLength(3);
+    expect(claude()).toEqual({});
+    expect(existsSync(plugin())).toBe(false);
+    expect((await run("setup", "uninstall")).stdout.match(/not installed \(no-op\)/g)).toHaveLength(3);
+  });
+
+  it("uses the bare name when PATH finds this install", async () => {
+    const binDir = join(home, "bin");
+    mkdirSync(binDir);
+    symlinkSync(bin, join(binDir, "hetzner-axi"));
+    process.env["PATH"] = `${binDir}${delimiter}${saved.path}`;
+    expect((await run("setup", "hooks")).stdout).toContain("runs: hetzner-axi context");
+    expect(findHooks(claude(), "hetzner-axi").end).toBe("hetzner-axi context end");
+  });
+
+  it("reports a moved binary and repairs the path", async () => {
+    await run("setup", "hooks");
+    const moved = install("lib2");
+    renameSync(join(home, "lib"), join(home, "old-lib"));
+    expect((await run("setup", "status")).stdout).toContain("claude_code: broken -");
+    expect((await run("setup", "hooks")).stdout).toContain("claude_code: installed (session start + end)");
+    expect(findHooks(claude(), "hetzner-axi").start).toBe(`${moved} context`);
+    expect((await run("setup", "status")).stdout).toContain("claude_code: session start + end");
+  });
+
+  it("reports the overview hook and plugin the axi-sdk-js installer wrote as outdated and upgrades them", async () => {
+    mkdirSync(dirname(plugin()), { recursive: true });
+    writeFileSync(plugin(), '// axi-sdk-js managed opencode plugin: hetzner-axi\nconst command = "hetzner-axi";\n');
+    mkdirSync(join(home, ".claude"));
+    writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ hooks: { SessionStart: [{ matcher: "", hooks: [{ type: "command", command: "hetzner-axi", timeout: 10 }] }] } }));
+    const before = (await run("setup", "status")).stdout;
+    expect(before).toContain("claude_code: session start - outdated; rerun setup hooks");
+    expect(before).toContain("opencode: outdated - rerun setup hooks");
+    expect((await run("setup", "hooks")).exitCode).toBe(0);
+    expect(claude().hooks!["SessionStart"]).toEqual([{ matcher: "", hooks: [{ type: "command", command: `${bin} context`, timeout: 10 }] }]);
+    expect(readFileSync(plugin(), "utf-8")).toContain('const args = ["context"];');
+    expect((await run("setup", "status")).stdout).toMatch(/claude_code: session start \+ end\n {2}codex: session start\n {2}opencode: session start/);
+  });
+
+  it("fails with SETUP_FAILED on a partial install and keeps what worked", async () => {
+    mkdirSync(join(home, ".codex"));
+    writeFileSync(join(home, ".codex", "hooks.json"), "{not json");
+    const { stdout, exitCode } = await run("setup", "hooks");
+    expect(exitCode).toBe(1);
+    expect(stdout).toContain("code: SETUP_FAILED");
+    expect(stdout).toContain("hooks.json is not valid JSON");
+    expect(findHooks(claude(), "hetzner-axi").start).toBe(`${bin} context`);
+  });
+
+  it("writes project and local scopes under the working directory only", async () => {
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "hetzner-axi-project-")));
+    process.chdir(project);
+    expect((await run("setup", "hooks", "--local")).stdout).toContain("claude_code: installed (session start + end)");
+    expect(findHooks(readJson(join(project, ".claude", "settings.local.json")), "hetzner-axi").end).toBe(`${bin} context end`);
+    expect((await run("setup", "hooks", "--project")).stdout).toContain("teammates need hetzner-axi on PATH");
+    expect(existsSync(join(project, ".opencode", "plugins", "axi-hetzner-axi.js"))).toBe(true);
+    expect(existsSync(join(home, ".claude", "settings.json"))).toBe(false);
+  });
+
+  it("honours CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME", async () => {
+    for (const [v, dir] of [["CLAUDE_CONFIG_DIR", "claude-dir"], ["CODEX_HOME", "codex-dir"], ["XDG_CONFIG_HOME", "xdg"]] as const) process.env[v] = join(home, dir);
+    expect((await run("setup", "hooks")).exitCode).toBe(0);
+    expect(findHooks(readJson(join(home, "claude-dir", "settings.json")), "hetzner-axi").start).toBe(`${bin} context`);
+    expect(findHooks(readJson(join(home, "codex-dir", "hooks.json")), "hetzner-axi").start).toBe(`${bin} context`);
+    expect(existsSync(join(home, "xdg", "opencode", "plugins", "axi-hetzner-axi.js"))).toBe(true);
+    expect(existsSync(join(home, ".claude"))).toBe(false);
+  });
+
+  it("refuses a source checkout", async () => {
+    process.argv[1] = join(saved.cwd, "bin", "hetzner-axi.ts");
+    const { stdout, exitCode } = await run("setup", "hooks");
+    expect(exitCode).toBe(2);
+    expect(stdout).toContain("not from a source checkout");
+    expect(existsSync(join(home, ".claude"))).toBe(false);
   });
 });
 

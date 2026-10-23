@@ -5,7 +5,7 @@ import { AxiError } from "../errors.js";
 import { block, helpBlock, out, str, type Obj } from "../render.js";
 import { serverRow } from "./server.js";
 
-/** The home view runs at every session start: keep it fast and tiny. */
+/** Agents often run the live overview first: keep it fast and tiny. */
 const HOME_TIMEOUT_MS = 8_000;
 const HOME_ROWS = 5;
 
