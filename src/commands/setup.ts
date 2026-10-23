@@ -27,6 +27,7 @@ import { block, helpBlock, out, shellQuote, type Obj } from "../render.js";
 import { shellSegments } from "../sessionlog.js";
 
 const NAME = "hetzner-axi";
+const SKILL_INSTALL = `npx skills add cmosgh/${NAME} --skill ${NAME}`;
 
 export const SETUP_HELP = `usage: hetzner-axi setup <hooks|status|uninstall> [--project | --local]
 Opt-in agent hooks. At session start Claude Code, Codex and OpenCode run \`hetzner-axi context\` and add its short summary to the agent's context; it reads only the config file, never the Hetzner API or the keychain.
@@ -36,7 +37,7 @@ flags{hooks,status,uninstall}:
 notes:
   Rerun \`setup hooks\` after an upgrade or a move: it repairs the hook command, and is a no-op when nothing changed.
   Codex reads hooks only with [features] hooks = true in ~/.codex/config.toml: setup sets it; uninstall leaves it (other tools use it).
-  Without hooks, install the skill instead (loads on demand, no per-session cost): npx skills add cmosgh/hetzner-axi --skill hetzner-axi
+  Without hooks, install the skill instead (loads on demand, no per-session cost): ${SKILL_INSTALL}
 examples[3]:
   hetzner-axi setup hooks
   hetzner-axi setup hooks --local
@@ -62,6 +63,9 @@ const real = (path: string): string | undefined => {
     return undefined;
   }
 };
+
+/** npx and pnpm dlx run from a cache that later sessions do not have on PATH, so a hook there breaks. */
+const TEMPORARY_INSTALL = /[\\/](_npx|dlx)[\\/]/;
 
 /** The bare name when PATH finds this same install (portable for teammates), else the absolute path. */
 function portableBin(execPath: string): string {
@@ -201,12 +205,19 @@ export async function setupCommand(args: string[]): Promise<string> {
   expectPositionals(parsed, 0, `${command} [--project | --local]`);
   if (bool(parsed, "--project") && bool(parsed, "--local")) throw usageError("pass --project or --local, not both");
   const scope: Scope = bool(parsed, "--local") ? "local" : bool(parsed, "--project") ? "project" : "user";
+  const rerun = `${command}${scope === "user" ? "" : ` --${scope}`}`;
 
   if (sub === "status") return status(scope);
   if (sub === "uninstall") return block({ hooks: uninstall(scope) });
 
   const execPath = installedExecPath();
-  if (!execPath) throw usageError("run setup from an installed hetzner-axi (npm install -g hetzner-axi), not from a source checkout");
+  if (!execPath) throw usageError(`run setup from an installed ${NAME} (npm install -g ${NAME}), not from a source checkout`);
+  if (TEMPORARY_INSTALL.test(real(execPath) ?? execPath)) {
+    throw usageError(`this ${NAME} runs from the npx cache, which later sessions do not have - a hook would break`, [
+      `Run \`npm install -g ${NAME}\`, then \`${rerun}\``,
+      `Or use the skill instead: ${SKILL_INSTALL}`,
+    ]);
+  }
   const bin = portableBin(execPath);
   const outcomes = install(scope, bin);
   const failed = outcomes.filter((o) => o.failed);
@@ -215,7 +226,7 @@ export async function setupCommand(args: string[]): Promise<string> {
     throw axiError(
       `${failed.map((o) => `${AGENT_NAMES[o.agent]} failed - ${o.failed}`).join("; ")}${done.length > 0 ? ` (${done.join(" and ")} done)` : ""}`,
       "SETUP_FAILED",
-      [`Fix that, then rerun \`${command}${scope === "user" ? "" : ` --${scope}`}\` - hooks already in place are left as they are`],
+      [`Fix that, then rerun \`${rerun}\` - hooks already in place are left as they are`],
     );
   }
   const hooks: Obj = { scope };

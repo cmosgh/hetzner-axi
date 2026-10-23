@@ -268,6 +268,29 @@ describe("setup", () => {
     expect(existsSync(join(home, ".claude"))).toBe(false);
   });
 
+  it("refuses an npx copy, whose cache later sessions do not have on PATH", async () => {
+    install(join(".npm", "_npx", "3f2a"));
+    const { stdout, exitCode } = await run("setup", "hooks");
+    expect(exitCode).toBe(2);
+    expect(stdout).toContain("runs from the npx cache");
+    expect(stdout).toContain("Run `npm install -g hetzner-axi`, then `hetzner-axi setup hooks`");
+    expect(stdout).toContain("npx skills add cmosgh/hetzner-axi --skill hetzner-axi");
+    expect(existsSync(join(home, ".claude"))).toBe(false);
+  });
+
+  it("refuses a pnpm dlx copy behind a symlink, and the hint keeps the scope", async () => {
+    const binDir = join(home, "dlx-bin");
+    mkdirSync(binDir);
+    symlinkSync(install(join("Library", "Caches", "pnpm", "dlx", "9c1e")), join(binDir, "hetzner-axi"));
+    process.argv[1] = join(binDir, "hetzner-axi");
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "hetzner-axi-project-")));
+    process.chdir(project);
+    const { stdout, exitCode } = await run("setup", "hooks", "--local");
+    expect(exitCode).toBe(2);
+    expect(stdout).toContain("then `hetzner-axi setup hooks --local`");
+    expect(existsSync(join(project, ".claude"))).toBe(false);
+  });
+
   it("refuses a source checkout", async () => {
     process.argv[1] = join(saved.cwd, "bin", "hetzner-axi.ts");
     const { stdout, exitCode } = await run("setup", "hooks");

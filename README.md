@@ -116,6 +116,7 @@ help[3]:
 | `hetzner-axi setup hooks --project` | everyone working in this repository (commit the files) | `.claude/settings.json`, `.codex/hooks.json`, `.opencode/plugins/`, and the same Codex flag in `~/.codex/config.toml` |
 | `hetzner-axi setup hooks --local` | only you, only in this repository (Claude Code) | `.claude/settings.local.json`; it says so if git would commit the file |
 
+- **Install first:** run setup from a global install (`npm install -g hetzner-axi`). An `npx` or `pnpm dlx` copy is refused: its cache is not on PATH in later sessions, so the hook would break.
 - **Scope:** run `--project` and `--local` from the repository root. `setup status` and `setup uninstall` take the same flag. User-scope paths follow `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `XDG_CONFIG_HOME` when they are set.
 - **Repairs:** rerun `setup hooks` after you upgrade or move the install. It rewrites the hook command and is a no-op when nothing changed. `setup status` shows `broken` or `outdated` when a rerun is needed. Hooks installed by 0.1.0 ran the live overview at session start, and a rerun switches them to `context`.
 - **Other hooks:** setup changes only its own hooks. It recognises them by the binary name and `context` argument, and leaves any other hook alone.
