@@ -27,13 +27,20 @@ Requires Node.js 20+.
 npm install -g hetzner-axi
 ```
 
-One line in `CLAUDE.md` / `AGENTS.md`:
+Then tell your agent about it - one line in `CLAUDE.md` / `AGENTS.md`:
 
 ```
 Use `hetzner-axi` for anything in Hetzner Cloud (servers, firewalls, volumes, IPs, DNS zones).
 ```
 
-Optional: `hetzner-axi setup hooks` shows the project overview at agent session start.
+Or install one of the two integrations (you only need one):
+
+```sh
+hetzner-axi setup hooks                                 # SessionStart hook: project overview as ambient context (Claude Code, Codex, OpenCode)
+npx skills add cmosgh/hetzner-axi --skill hetzner-axi   # on-demand Agent Skill, no per-session cost
+```
+
+`setup hooks --project` scopes the hook to the current repository; `setup uninstall` removes it. Until hetzner-axi is configured, the overview is two lines and makes no network or keychain access.
 
 ## Authenticate
 
