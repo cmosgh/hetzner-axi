@@ -86,7 +86,8 @@ export function findInvocations(commandLine: string, name: string, commandName: 
     // `npx -y hetzner-axi@latest` and `node .../dist/bin/hetzner-axi.js` run it too.
     const base = (words[i] ?? "").split("/").pop()!.replace(/@[^@]*$/, "");
     if (base !== name && base !== `${name}.js`) continue;
-    const args = words.slice(i + 1);
+    // --json may stand anywhere, even before the command.
+    const args = words.slice(i + 1).filter((word) => word !== "--json");
     const flagAt = args.findIndex((word) => word.startsWith("-"));
     const lead = flagAt === -1 ? args : args.slice(0, flagAt);
     let command: string;

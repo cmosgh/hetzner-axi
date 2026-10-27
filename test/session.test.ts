@@ -78,6 +78,7 @@ describe("session capture", () => {
     expect(find("node /usr/lib/node_modules/hetzner-axi/dist/bin/hetzner-axi.js api GET /servers/42 && npx hetzner-axi@latest context")).toEqual([{ command: "api" }, { command: "context" }]);
     expect(find("HETZNER_AXI_CONTEXT='$(cat x)' hetzner-axi auth status")).toEqual([{ command: "auth status" }]);
     expect(find("hetzner-axi --help; hetzner-axi -v; hetzner-axi; hetzner-axi --bogus x")).toEqual([{ command: "help" }, { command: "version" }, { command: "home" }, { command: "other" }]);
+    expect(find("hetzner-axi --json server list; hetzner-axi --json")).toEqual([{ command: "server list" }, { command: "home" }]);
     expect(find("echo hetzner-axi; grep hetzner-axi x")).toEqual([]);
   });
 

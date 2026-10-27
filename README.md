@@ -13,8 +13,8 @@ servers[3]{name,status,type,ipv4}:
   db-1,running,ccx13,203.0.113.11
   web-1,running,cx22,203.0.113.10
 help[2]:
-  Run `hetzner-axi server view <name>` for details
-  Run `hetzner-axi --help` for every command
+  - Run `hetzner-axi server view <name>` for details
+  - Run `hetzner-axi --help` for every command
 ```
 
 > **Status: early (v0.1.x).** Covered by unit and mocked end-to-end tests.
@@ -79,6 +79,12 @@ hetzner-axi auth use staging
 
 Every command has `--help`. Lists show at most four fields per row; `--fields` adds the extras each list's `--help` names.
 
+Output is strict [TOON](https://toonformat.dev/). For scripts, `--json` anywhere on the line prints the same payload as JSON; errors keep their exit code:
+
+```sh
+hetzner-axi server list --json | jq -r '.servers[]?.ipv4'
+```
+
 ## Agent integration
 
 There are two ways to tell an agent about `hetzner-axi`. You only need one.
@@ -105,9 +111,9 @@ contexts: prod (active); staging
 hcloud_token: not set
 last_session: 2026-10-23 - server list 3; server view 2; firewall add-rule 1 - context staging
 help[3]:
-  Run `hetzner-axi` for live server state; `hetzner-axi --help` for commands
-  Run `hetzner-axi server list`, `hetzner-axi firewall list` or `hetzner-axi dns zone list` to explore; `hetzner-axi <command> --help` for flags
-  Switch projects with `hetzner-axi auth use <prod|staging>`, or prefix one command with `HETZNER_AXI_CONTEXT=<name>`
+  - Run `hetzner-axi` for live server state; `hetzner-axi --help` for commands
+  - Run `hetzner-axi server list`, `hetzner-axi firewall list` or `hetzner-axi dns zone list` to explore; `hetzner-axi <command> --help` for flags
+  - Switch projects with `hetzner-axi auth use <prod|staging>`, or prefix one command with `HETZNER_AXI_CONTEXT=<name>`
 ```
 
 | Command | Applies to | Files written |

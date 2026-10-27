@@ -24,7 +24,7 @@ import { serverCommand, SERVER_HELP } from "./commands/server.js";
 import { setupCommand, SETUP_HELP } from "./commands/setup.js";
 import { volumeCommand, VOLUME_HELP } from "./commands/volume.js";
 import { AxiError, exitCodeForError } from "./errors.js";
-import { renderErrorOutput } from "./render.js";
+import { renderErrorOutput, toJson } from "./render.js";
 import { VERSION } from "./version.js";
 
 export const DESCRIPTION =
@@ -33,8 +33,8 @@ export const DESCRIPTION =
 export const TOP_HELP = `usage: hetzner-axi [command] [args] [flags]
 commands[16]:
   (none)=live project overview, server, firewall, volume, ip, dns, ssh-key, image, location, network, lb, action, api, auth, setup, context (session hooks)
-flags[2]:
-  --help, -v/-V/--version
+flags[3]:
+  --json (JSON instead of TOON, for scripts), --help, -v/-V/--version
 examples:
   hetzner-axi
   hetzner-axi server list
@@ -124,9 +124,14 @@ export interface MainOptions {
 }
 
 export async function main(options: MainOptions = {}): Promise<void> {
+  // Stripped here: the SDK rejects flags before the command, and --json may stand anywhere.
+  const argv = options.argv ?? process.argv.slice(2);
+  const json = argv.includes("--json");
+  const stdout = options.stdout ?? process.stdout;
+  let buffered = "";
   await runAxiCli({
-    ...(options.argv ? { argv: options.argv } : {}),
-    ...(options.stdout ? { stdout: options.stdout } : {}),
+    argv: json ? argv.filter((a) => a !== "--json") : argv,
+    stdout: json ? { write: (chunk: string) => (buffered += chunk) } : stdout,
     description: DESCRIPTION,
     version: VERSION,
     topLevelHelp: TOP_HELP,
@@ -140,4 +145,8 @@ export async function main(options: MainOptions = {}): Promise<void> {
       ])}\n`,
     formatError,
   });
+  if (!json) return;
+  // The SDK only guards the stdout it writes to: `--json | head` must not crash on EPIPE either.
+  if (stdout === process.stdout) process.stdout.on("error", (error: NodeJS.ErrnoException) => { if (error.code !== "EPIPE") throw error; });
+  stdout.write(toJson(buffered));
 }

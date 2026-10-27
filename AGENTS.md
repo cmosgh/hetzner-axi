@@ -4,6 +4,7 @@ AXI-compliant Hetzner Cloud CLI. Read the AXI principles (https://axi.md) before
 
 - **Output is the product.** Every stdout byte costs tokens. Default list schemas stay at 3-4 fields; extras go behind `--fields` (a `Fields` map per list, see `extraFields()` in `src/render.ts`). Keep numbers as numbers (TOON quotes numeric-looking strings). Avoid commas, colons and double quotes inside literal TOON string values.
 - **Handlers return strings** built with `block()` (TOON), `helpBlock()` (one suggestion per line) and `out()` from `src/render.ts`.
+- **Output decodes.** stdout is strict TOON with unique top-level keys; `--json` prints the decoded payload. `run()` in `test/helpers.ts` asserts both for every command a test runs. Raw text, if a command ever prints some, goes between `---` fences in TOON and becomes a string field under `--json`.
 - **Every flag is declared.** `parseArgs()` in `src/args.ts` rejects unknown flags with the valid set inline. Validate all input before the first network call; usage errors are `VALIDATION_ERROR` (exit 2).
 - **Mutations are idempotent** (pre-check state, report `(no-op)`, exit 0). Anything that costs money, cuts traffic or destroys data previews until `--confirm` (`preview()` in `src/resources.ts`). Mutations wait for the Hetzner action (`settle()`), `--no-wait` returns early.
 - **Resources are addressed by name or id** through `findOne()`; misses list close names.

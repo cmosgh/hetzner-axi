@@ -1,11 +1,16 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { decode } from "@toon-format/toon";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBCOMMANDS } from "../src/cli.js";
 import { readConfig, writeConfig } from "../src/config.js";
 import { clearToken, storeToken } from "../src/credentials.js";
+import { helpBlock } from "../src/render.js";
 import { CX22, CX32, done, mockApi, page, run, running, server, useTestEnv } from "./helpers.js";
+
+/** The decoded `help` list of a TOON payload, one line per suggestion. */
+const helpText = (stdout: string): string => ((decode(stdout, { strict: true }) as { help?: string[] }).help ?? []).join("\n");
 
 // Stands in for the OS keychain so no test can reach the real one; records every entry opened.
 const keychain = vi.hoisted(() => ({ opened: [] as string[] }));
@@ -282,7 +287,7 @@ describe("list --fields", () => {
     const { stdout, exitCode } = await run(command, sub, "--fields", "bogus");
     expect(exitCode).toBe(2);
     expect(calls).toHaveLength(0);
-    const valid = /available --fields: (.+)/.exec(stdout)![1]!.split(", ");
+    const valid = /available --fields: (.+)/.exec(helpText(stdout))![1]!.split(", ");
     expect((await run(command, "--help")).stdout).toContain(`--fields <${valid.join(",")}>`);
   });
 
@@ -466,11 +471,11 @@ describe("protected volumes and zones", () => {
     const volume = await run("volume", "delete", "data", "--confirm");
     expect(volume.exitCode).toBe(1);
     expect(volume.stdout).toContain("code: PROTECTED");
-    expect(volume.stdout).toContain(`Run \`hetzner-axi api POST /volumes/6/actions/change_protection --data '{"delete":false}'\` first to turn delete protection off`);
+    expect(helpText(volume.stdout)).toContain(`Run \`hetzner-axi api POST /volumes/6/actions/change_protection --data '{"delete":false}'\` first to turn delete protection off`);
     const zone = await run("dns", "zone", "delete", "example.com", "--confirm");
     expect(zone.stdout).toContain("code: PROTECTED");
-    expect(zone.stdout).toContain(`Run \`hetzner-axi api POST /zones/3/actions/change_protection --data '{"delete":false}'\` first`);
-    const [, call, data] = /Run `hetzner-axi (api POST \S+) --data '(.+)'` first/.exec(volume.stdout)!;
+    expect(helpText(zone.stdout)).toContain(`Run \`hetzner-axi api POST /zones/3/actions/change_protection --data '{"delete":false}'\` first`);
+    const [, call, data] = /Run `hetzner-axi (api POST \S+) --data '(.+)'` first/.exec(helpText(volume.stdout))!;
     expect((await run(...call!.split(" "), "--data", data!)).exitCode).toBe(0);
     expect(calls.find((c) => c.method === "POST")).toMatchObject({ path: "/volumes/6/actions/change_protection", body: { delete: false } });
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
@@ -595,7 +600,7 @@ describe("help", () => {
 
   it("lists the subcommands each command accepts, as session capture records them", async () => {
     const { calls } = mockApi([]);
-    const listed = async (...argv: string[]) => /subcommands: (.+)$/m.exec((await run(...argv, "nope")).stdout)![1]!.split(", ");
+    const listed = async (...argv: string[]) => /subcommands: (.+)$/m.exec(helpText((await run(...argv, "nope")).stdout))![1]!.split(", ");
     for (const [command, subs] of commands) if (command !== "dns" && command !== "context") expect(await listed(command), command).toEqual(subs);
     for (const group of ["zone", "record"]) expect((await listed("dns", group)).map((s) => `${group} ${s}`)).toEqual(SUBCOMMANDS["dns"]!.filter((s) => s.startsWith(`${group} `)));
     expect(calls).toHaveLength(0);
@@ -642,5 +647,90 @@ describe("errors and api", () => {
     mockApi([{ path: "/server_types", json: page("server_types", [CX22]) }]);
     const { stdout } = await run("api", "/server_types", "--query", "name=cx22");
     expect(stdout).toContain("run `hetzner-axi api /server_types --query name=cx22 --full` for the raw payload");
+  });
+});
+
+describe("machine-readable output", () => {
+  const fw = { id: 9, name: "web", labels: { env: "prod" }, rules: [{ direction: "in", protocol: "tcp", port: "22", source_ips: ["0.0.0.0/0"], description: "ssh: admins" }], applied_to: [{ type: "server", server: { id: 42 } }] };
+  const zone = { id: 3, name: "example.com", mode: "primary", status: "ok", ttl: 3600, record_count: 2, authoritative_nameservers: { assigned: ["hydrogen.ns.hetzner.com."], delegation_status: "invalid" }, protection: { delete: false }, created: new Date().toISOString() };
+  const volume = { id: 6, name: "data", size: 50, server: null, location: { name: "fsn1" }, linux_device: "/dev/disk/by-id/scsi-0HC_Volume_6", protection: { delete: false } };
+  const json = async (...argv: string[]) => {
+    const { stdout, exitCode } = await run(...argv, "--json");
+    return { value: JSON.parse(stdout) as Record<string, any>, exitCode };
+  };
+
+  // run() already asserts strict TOON for each of these; they have no other test.
+  it("commands without their own test still decode as TOON", async () => {
+    mockApi([
+      byName("web-1", server("web-1")),
+      { path: "/firewalls", reply: (c) => ({ json: page("firewalls", c.url.searchParams.get("name") === "new-fw" ? [] : [fw]) }) },
+      { method: "POST", path: "/firewalls", json: { firewall: { id: 10, name: "new-fw" } } },
+      { method: "POST", path: "/firewalls/9/actions/set_rules", json: { actions: [done()] } },
+      { method: "POST", path: "/firewalls/9/actions/remove_from_resources", json: { actions: [done()] } },
+      { path: "/volumes", json: page("volumes", [volume]) },
+      { method: "POST", path: "/volumes/6/actions/attach", json: { action: done() } },
+      { path: "/zones", reply: (c) => ({ json: page("zones", c.url.searchParams.get("name") ? [] : [zone]) }) },
+      { path: "/zones/example.com", json: { zone } },
+      { method: "POST", path: "/zones", json: { zone: { ...zone, name: "example.org" }, action: done() } },
+      { path: "/zones/3/rrsets", json: page("rrsets", [{ name: "@", type: "TXT", ttl: null, records: [{ value: '"v=spf1 -all"' }] }, { name: "www", type: "A", ttl: 300, records: [{ value: "203.0.113.10" }] }]) },
+      { path: "/ssh_keys", json: page("ssh_keys", [{ id: 5, name: "laptop", fingerprint: "b7:2f:30:a0:2f:6c:58:6c:21:04:58:61:ba:06:3b:2f", created: new Date().toISOString() }]) },
+      { path: "/images/77", json: { image: { id: 77, type: "snapshot", description: "web-1 2026-10-01", image_size: 1.2 } } },
+      { path: "/locations", json: page("locations", [{ name: "fsn1", city: "Falkenstein", country: "DE", network_zone: "eu-central" }]) },
+      { path: "/networks", json: page("networks", [{ name: "internal", ip_range: "10.0.0.0/16", subnets: [{ ip_range: "10.0.1.0/24", network_zone: "eu-central" }], servers: [42] }]) },
+      { method: "POST", path: "/servers/42/actions/create_image", json: { image: { id: 77 }, action: running() } },
+      { path: "/actions/4711", json: { action: { id: 4711, command: "start_server", status: "error", progress: 100, started: new Date().toISOString(), finished: null, resources: [{ type: "server", id: 42 }], error: { code: "locked", message: "server is locked: try again" } } } },
+    ]);
+    for (const argv of [
+      ["firewall", "list"],
+      ["firewall", "view", "web"],
+      ["firewall", "create", "--name", "new-fw"],
+      ["firewall", "remove-rule", "web", "--protocol", "tcp", "--port", "22", "--source-ip", "0.0.0.0/0", "--confirm"],
+      ["firewall", "remove-from", "web", "--server", "web-1", "--confirm"],
+      ["volume", "attach", "data", "--server", "web-1"],
+      ["dns", "zone", "list"],
+      ["dns", "zone", "view", "example.com"],
+      ["dns", "zone", "create", "--name", "example.org"],
+      ["dns", "record", "list", "example.com"],
+      ["ssh-key", "list"],
+      ["ssh-key", "delete", "laptop"],
+      ["image", "delete", "77"],
+      ["location", "list"],
+      ["network", "list"],
+      ["action", "view", "4711"],
+      ["server", "shutdown", "web-1"],
+      ["server", "snapshot", "web-1", "--no-wait"],
+    ]) {
+      expect((await run(...argv)).exitCode, argv.join(" ")).toBe(0);
+    }
+    expect((await run("firewall", "delete", "web")).exitCode).toBe(2);
+    writeConfig({ contexts: ["prod", "staging"], active: "prod" });
+    expect((await run("auth", "use", "staging")).exitCode).toBe(0);
+  });
+
+  it("--json decodes the same object TOON shows", async () => {
+    mockApi([{ path: "/servers", json: page("servers", [server("web-1")]) }]);
+    const toon = await run("server", "list");
+    expect((await json("server", "list")).value).toEqual(decode(toon.stdout, { strict: true }));
+  });
+
+  it("--json keeps errors structured and the exit code", async () => {
+    mockApi([]);
+    const { value, exitCode } = await json("server", "list", "--fields", "bogus");
+    expect(exitCode).toBe(2);
+    expect(value).toMatchObject({ code: "VALIDATION_ERROR", help: [expect.stringContaining("available --fields")] });
+  });
+
+  it("--json works before the command and on the home view", async () => {
+    mockApi([{ path: "/servers", json: page("servers", [server("web-1")]) }]);
+    expect(JSON.parse((await run("--json", "server", "list")).stdout)).toMatchObject({ servers: [{ name: "web-1" }] });
+    expect((await json()).value).toMatchObject({ server_count: "1 (1 running)", help: expect.arrayContaining([expect.stringContaining("server view")]) });
+  });
+
+  it("help lines that look like key: value stay strings", async () => {
+    expect(decode(helpBlock(["Run `x` to see: a,b", "42", 'say "hi"']), { strict: true })).toEqual({ help: ["Run `x` to see: a,b", "42", 'say "hi"'] });
+  });
+
+  it("--json wraps help pages that are not TOON", async () => {
+    expect(JSON.parse((await run("--help", "--json")).stdout)["text"]).toContain("usage: hetzner-axi");
   });
 });
